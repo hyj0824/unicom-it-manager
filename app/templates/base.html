@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Callback Demo{% endblock %}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body class="{% if not is_authenticated %}auth-page{% endif %}">
+    {% if is_authenticated %}
+      {% set path = request.url.path %}
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">CB</span>
+          <span>Callback Demo</span>
+        </div>
+        <nav class="nav">
+          <a class="{% if path == '/' %}active{% endif %}" href="/">Dashboard</a>
+          <a class="{% if path.startswith('/customers') %}active{% endif %}" href="/customers">Customers</a>
+          <a class="{% if path.startswith('/scripts') %}active{% endif %}" href="/scripts">Scripts</a>
+          <a class="{% if path.startswith('/plans') %}active{% endif %}" href="/plans">Plans</a>
+          <a class="{% if path.startswith('/calls') %}active{% endif %}" href="/calls">Calls</a>
+        </nav>
+      </aside>
+      <main class="shell">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow">Rock Pi 3A local admin</div>
+            <h1>{% block page_title %}Dashboard{% endblock %}</h1>
+          </div>
+          <div class="topbar-actions">
+            <span class="status-pill {% if scheduler_enabled %}ok{% else %}muted{% endif %}">
+              Scheduler {{ "running" if scheduler_enabled else "paused" }}
+            </span>
+            <form method="post" action="/settings/scheduler">
+              <input type="hidden" name="enabled" value="{{ 0 if scheduler_enabled else 1 }}">
+              <input type="hidden" name="next" value="{{ request.url.path }}">
+              <button class="button secondary" type="submit">{{ "Pause" if scheduler_enabled else "Resume" }}</button>
+            </form>
+            <form method="post" action="/logout">
+              <button class="button ghost" type="submit">Sign out</button>
+            </form>
+          </div>
+        </header>
+        <section class="content">
+          {% block content %}{% endblock %}
+        </section>
+      </main>
+    {% else %}
+      {% block auth_content %}{% endblock %}
+    {% endif %}
+    <script src="/static/app.js"></script>
+  </body>
+</html>

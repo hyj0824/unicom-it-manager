@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.deps/
+.env
+data/*
+
+# Local source data and generated call media may contain customer information.
+docs/*.xlsx
+*.wav
+*.mp3

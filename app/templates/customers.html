@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block page_title %}Customers{% endblock %}
+{% block content %}
+  <div class="grid form-list">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>{{ "Edit customer" if edit_customer else "New customer" }}</h2>
+      </div>
+      {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+      <form class="stack" method="post" action="{{ '/customers/' ~ edit_customer.id ~ '/edit' if edit_customer else '/customers' }}">
+        <label>
+          Name
+          <input name="name" value="{{ form_data.get('name', edit_customer.name if edit_customer else '') }}" required>
+        </label>
+        <label>
+          Phone
+          <input name="phone" value="{{ form_data.get('phone', edit_customer.phone if edit_customer else '') }}" placeholder="Enter phone number" required>
+        </label>
+        <label>
+          Notes
+          <textarea name="notes" rows="5">{{ form_data.get('notes', edit_customer.notes if edit_customer else '') }}</textarea>
+        </label>
+        <div class="button-row">
+          <button class="button primary" type="submit">{{ "Save changes" if edit_customer else "Create customer" }}</button>
+          {% if edit_customer %}<a class="button ghost" href="/customers">Cancel</a>{% endif %}
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Customer list</h2>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Created</th>
+            <th class="actions-col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for customer in customers %}
+            <tr>
+              <td>{{ customer.name }}</td>
+              <td>{{ customer.phone }}</td>
+              <td>{{ customer.created_at|dt }}</td>
+              <td class="actions">
+                <a class="button secondary small" href="/customers?edit_id={{ customer.id }}">Edit</a>
+                <form method="post" action="/customers/{{ customer.id }}/delete" data-confirm="Delete this customer?">
+                  <button class="button danger small" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">No customers yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+{% endblock %}

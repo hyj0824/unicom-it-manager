@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block page_title %}Call detail{% endblock %}
+{% block content %}
+  <div class="grid two">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Record</h2>
+        <a class="button secondary" href="/calls">Back</a>
+      </div>
+      <dl class="detail-list">
+        <dt>Customer</dt><dd>{{ record.customer.name }} {{ record.customer.phone }}</dd>
+        <dt>Script</dt><dd>{{ record.script.title }}</dd>
+        <dt>Status</dt><dd><span class="status-pill {{ record.status }}">{{ record.status }}</span></dd>
+        <dt>Dialing started</dt><dd>{{ record.dialing_started_at|dt }}</dd>
+        <dt>Connected</dt><dd>{{ record.connected_at|dt }}</dd>
+        <dt>Ended</dt><dd>{{ record.ended_at|dt }}</dd>
+        <dt>Duration</dt><dd>{{ record.duration_seconds or "-" }}</dd>
+        <dt>Error</dt><dd>{{ record.error_message or "-" }}</dd>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Operator result</h2>
+      </div>
+      <form class="stack" method="post" action="/calls/{{ record.id }}/feedback">
+        <label>
+          Feedback
+          <textarea name="operator_feedback" rows="6">{{ record.operator_feedback }}</textarea>
+        </label>
+        <label class="check">
+          <input type="checkbox" name="follow_up_required" {% if record.follow_up_required %}checked{% endif %}>
+          Follow up required
+        </label>
+        <button class="button primary" type="submit">Save feedback</button>
+      </form>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Events</h2>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Type</th>
+          <th>Message</th>
+          <th>Raw</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+          <tr>
+            <td>{{ event.created_at|dt }}</td>
+            <td><span class="status-pill muted">{{ event.event_type }}</span></td>
+            <td>{{ event.message or "-" }}</td>
+            <td class="mono">{{ event.raw_line or "-" }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="empty">No events yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

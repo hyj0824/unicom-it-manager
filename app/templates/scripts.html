@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block page_title %}Scripts{% endblock %}
+{% block content %}
+  <div class="grid form-list">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>{{ "Edit script" if edit_script else "New script" }}</h2>
+      </div>
+      {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+      <form class="stack" method="post" action="{{ '/scripts/' ~ edit_script.id ~ '/edit' if edit_script else '/scripts' }}">
+        <label>
+          Title
+          <input name="title" value="{{ form_data.get('title', edit_script.title if edit_script else '') }}" required>
+        </label>
+        <label>
+          Script text
+          <textarea name="body" rows="8" required>{{ form_data.get('body', edit_script.body if edit_script else '') }}</textarea>
+        </label>
+        <label>
+          WAV path
+          <input name="wav_path" value="{{ form_data.get('wav_path', edit_script.wav_path if edit_script else '') }}" placeholder="/home/radxa/audio/callback.wav">
+        </label>
+        <div class="button-row">
+          <button class="button primary" type="submit">{{ "Save changes" if edit_script else "Create script" }}</button>
+          {% if edit_script %}<a class="button ghost" href="/scripts">Cancel</a>{% endif %}
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Script list</h2>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>TTS</th>
+            <th>WAV</th>
+            <th class="actions-col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for script in scripts %}
+            <tr>
+              <td>{{ script.title }}</td>
+              <td><span class="status-pill {{ script.tts_status }}">{{ script.tts_status }}</span></td>
+              <td class="mono">{{ script.wav_path or "-" }}</td>
+              <td class="actions">
+                <a class="button secondary small" href="/scripts?edit_id={{ script.id }}">Edit</a>
+                <form method="post" action="/scripts/{{ script.id }}/generate-audio">
+                  <button class="button secondary small" type="submit">Generate</button>
+                </form>
+                <form method="post" action="/scripts/{{ script.id }}/delete" data-confirm="Delete this script?">
+                  <button class="button danger small" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">No scripts yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+{% endblock %}

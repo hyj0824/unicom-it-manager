@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block page_title %}Dashboard{% endblock %}
+{% block content %}
+  <div class="metrics">
+    <div class="metric">
+      <span>Due today</span>
+      <strong>{{ due_today }}</strong>
+    </div>
+    <div class="metric">
+      <span>Active queue</span>
+      <strong>{{ "Yes" if active_task else "No" }}</strong>
+    </div>
+    <div class="metric">
+      <span>Completed</span>
+      <strong>{{ stats.completed }}</strong>
+    </div>
+    <div class="metric">
+      <span>Failed</span>
+      <strong>{{ stats.failed }}</strong>
+    </div>
+  </div>
+
+  <div class="grid two">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>System totals</h2>
+      </div>
+      <div class="summary-grid">
+        <div><span>Customers</span><strong>{{ counts.customers }}</strong></div>
+        <div><span>Scripts</span><strong>{{ counts.scripts }}</strong></div>
+        <div><span>Plans</span><strong>{{ counts.plans }}</strong></div>
+        <div><span>Records</span><strong>{{ counts.records }}</strong></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Call outcomes</h2>
+      </div>
+      <div class="summary-grid">
+        <div><span>Short calls</span><strong>{{ stats.short_call }}</strong></div>
+        <div><span>No answer</span><strong>{{ stats.no_answer }}</strong></div>
+        <div><span>Queued</span><strong>{{ stats.queued }}</strong></div>
+        <div><span>Scheduler</span><strong>{{ "On" if scheduler_enabled else "Off" }}</strong></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Recent call records</h2>
+      <a class="button secondary" href="/calls">View all</a>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Customer</th>
+          <th>Script</th>
+          <th>Status</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for record in recent_records %}
+          <tr>
+            <td>{{ record.created_at|dt }}</td>
+            <td>{{ record.customer.name }}</td>
+            <td>{{ record.script.title }}</td>
+            <td><span class="status-pill {{ record.status }}">{{ record.status }}</span></td>
+            <td>{{ record.duration_seconds or "-" }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="empty">No call records yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

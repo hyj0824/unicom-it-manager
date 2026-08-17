@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block page_title %}Plans{% endblock %}
+{% block content %}
+  <div class="grid form-list">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>{{ "Edit plan" if edit_plan else "New plan" }}</h2>
+      </div>
+      {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+      {% set selected_customer = form_data.get('customer_id', edit_plan.customer_id if edit_plan else '') %}
+      {% set selected_script = form_data.get('script_id', edit_plan.script_id if edit_plan else '') %}
+      {% set selected_trigger = form_data.get('trigger_type', edit_plan.trigger_type if edit_plan else 'once') %}
+      {% set selected_timezone = form_data.get('timezone', edit_plan.timezone if edit_plan else settings.default_timezone) %}
+      {% set enabled_checked = (form_data and form_data.get('enabled') == 'on') or ((not form_data) and (not edit_plan or edit_plan.enabled)) %}
+      <form class="stack" method="post" action="{{ '/plans/' ~ edit_plan.id ~ '/edit' if edit_plan else '/plans' }}">
+        <label>
+          Customer
+          <select name="customer_id" required>
+            <option value="">Select customer</option>
+            {% for customer in customers %}
+              <option value="{{ customer.id }}" {% if selected_customer|string == customer.id|string %}selected{% endif %}>{{ customer.name }} - {{ customer.phone }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Script
+          <select name="script_id" required>
+            <option value="">Select script</option>
+            {% for script in scripts %}
+              <option value="{{ script.id }}" {% if selected_script|string == script.id|string %}selected{% endif %}>{{ script.title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Trigger
+          <select name="trigger_type">
+            <option value="once" {% if selected_trigger == 'once' %}selected{% endif %}>once</option>
+            <option value="cron" {% if selected_trigger == 'cron' %}selected{% endif %}>cron</option>
+          </select>
+        </label>
+        <label>
+          Run at
+          <input type="datetime-local" name="run_at" value="{{ form_data.get('run_at', edit_plan.run_at|datetime_local(selected_timezone) if edit_plan else '') }}">
+        </label>
+        <label>
+          Cron expression
+          <input name="cron_expr" value="{{ form_data.get('cron_expr', edit_plan.cron_expr if edit_plan else '') }}" placeholder="0 9 * * *">
+        </label>
+        <label>
+          Timezone
+          <input name="timezone" value="{{ selected_timezone }}">
+        </label>
+        <label class="check">
+          <input type="checkbox" name="enabled" {% if enabled_checked %}checked{% endif %}>
+          Enabled
+        </label>
+        <div class="button-row">
+          <button class="button primary" type="submit">{{ "Save changes" if edit_plan else "Create plan" }}</button>
+          {% if edit_plan %}<a class="button ghost" href="/plans">Cancel</a>{% endif %}
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Plan list</h2>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Script</th>
+            <th>Trigger</th>
+            <th>Next run</th>
+            <th>Status</th>
+            <th class="actions-col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for plan in plans %}
+            <tr>
+              <td>{{ plan.customer.name }}</td>
+              <td>{{ plan.script.title }}</td>
+              <td>{{ plan.trigger_type }}{% if plan.cron_expr %}<span class="subtle mono"> {{ plan.cron_expr }}</span>{% endif %}</td>
+              <td>{{ plan.next_run_at|dt(plan.timezone) }}</td>
+              <td><span class="status-pill {% if plan.enabled %}ok{% else %}muted{% endif %}">{{ "enabled" if plan.enabled else "paused" }}</span></td>
+              <td class="actions">
+                <form method="post" action="/plans/{{ plan.id }}/call-now">
+                  <button class="button primary small" type="submit">Call now</button>
+                </form>
+                <a class="button secondary small" href="/plans?edit_id={{ plan.id }}">Edit</a>
+                <form method="post" action="/plans/{{ plan.id }}/toggle">
+                  <button class="button secondary small" type="submit">{{ "Pause" if plan.enabled else "Enable" }}</button>
+                </form>
+                <form method="post" action="/plans/{{ plan.id }}/delete" data-confirm="Delete this plan?">
+                  <button class="button danger small" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="empty">No plans yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+{% endblock %}
