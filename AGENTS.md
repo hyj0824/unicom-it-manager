@@ -55,6 +55,8 @@ uv run pytest -q
 - `app/main.py`：FastAPI 生命周期、登录保护、SSR 页面与表单路由。
 - `app/config.py`：环境变量读取、运行时配置和存储目录初始化。
 - `app/models.py`：SQLAlchemy 数据模型和通话主状态集合。
+- `app/services/`：customers（默认联系人）、dictionaries（字典）、ledger（台账
+  校验/缺项/审计）、imports（台账导入暂存）、users（密码哈希/角色）等业务逻辑。
 - `alembic/`：数据库迁移脚本；初始版本含完整新 schema，种子版本预置字典、
   权限和岗位角色。
 - `app/services/plans.py`：计划校验、下一次执行时间、任务入队和重启恢复。
