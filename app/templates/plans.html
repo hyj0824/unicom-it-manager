@@ -18,7 +18,7 @@
           <select name="customer_id" required>
             <option value="">Select customer</option>
             {% for customer in customers %}
-              <option value="{{ customer.id }}" {% if selected_customer|string == customer.id|string %}selected{% endif %}>{{ customer.name }} - {{ customer.phone }}</option>
+              <option value="{{ customer.id }}" {% if selected_customer|string == customer.id|string %}selected{% endif %}>{{ customer.name }} - {{ customer_phones.get(customer.id, '') }}</option>
             {% endfor %}
           </select>
         </label>

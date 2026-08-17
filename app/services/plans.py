@@ -18,6 +18,7 @@ from ..models import (
     Script,
     utcnow,
 )
+from .customers import default_contact as default_customer_contact
 
 
 PHONE_RE = re.compile(r"^\+?[0-9]{5,20}$")
@@ -141,14 +142,20 @@ def create_call_task(
     due_at: datetime | None = None,
     status: str = "queued",
     message: str = "Call task queued.",
+    source: str = "scheduled",
 ) -> CallTask:
     settings = get_settings()
+    contact = default_customer_contact(db, plan.customer)
+    dial_number = (contact.phone or "").strip() if contact else ""
     task = CallTask(
         plan=plan,
         customer=plan.customer,
         script=plan.script,
+        contact=contact,
+        dial_number=dial_number,
         due_at=as_utc(due_at) or utcnow(),
         status=status,
+        source=source,
         max_attempts=settings.max_call_attempts,
     )
     record = CallRecord(
@@ -156,6 +163,8 @@ def create_call_task(
         plan=plan,
         customer=plan.customer,
         script=plan.script,
+        contact=contact,
+        dial_number=dial_number,
         status=status,
     )
     event = CallEvent(call_record=record, event_type=status, message=message)

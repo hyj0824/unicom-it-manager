@@ -33,11 +33,16 @@ class CallWorker:
             plan=task.plan,
             customer=task.customer,
             script=task.script,
+            contact=task.contact,
+            dial_number=task.dial_number,
             status="dialing",
         )
         record.status = "dialing"
         record.dialing_started_at = task.started_at
         db.add(CallEvent(call_record=record, event_type="dialing", message="Worker claimed task."))
+
+        if not task.dial_number:
+            self._fail_task(db, task, record, "Task has no dial number.")
 
         wav_path = task.script.wav_path
         if not wav_path or not Path(wav_path).exists():

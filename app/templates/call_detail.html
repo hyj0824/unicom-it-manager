@@ -8,7 +8,8 @@
         <a class="button secondary" href="/calls">Back</a>
       </div>
       <dl class="detail-list">
-        <dt>Customer</dt><dd>{{ record.customer.name }} {{ record.customer.phone }}</dd>
+        <dt>Customer</dt><dd>{{ record.customer.name }}</dd>
+        <dt>Dial number</dt><dd class="mono">{{ record.dial_number or "-" }}</dd>
         <dt>Script</dt><dd>{{ record.script.title }}</dd>
         <dt>Status</dt><dd><span class="status-pill {{ record.status }}">{{ record.status }}</span></dd>
         <dt>Dialing started</dt><dd>{{ record.dialing_started_at|dt }}</dd>

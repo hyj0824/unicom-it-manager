@@ -57,7 +57,8 @@
 - 前端资源：本地 CSS + 少量原生 JavaScript，不依赖 CDN，不引入 React/Vue。
 - 数据库：SQLite。
 - ORM：SQLAlchemy。
-- 迁移工具：第一版暂不引入 Alembic，启动时创建表。
+- 迁移工具：使用 Alembic，生产启动不再依赖 `create_all` 自动变更结构；
+  每次结构变化都有可审查、可回滚的版本。
 - 调度器：APScheduler。
 - 串口控制：pyserial。
 - 音频播放：最简单方式，调用 `aplay` 播放本地 WAV。

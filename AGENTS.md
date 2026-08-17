@@ -35,6 +35,9 @@ uv run python -m compileall -q app scripts tests
 uv run pytest -q
 ```
 
+修改 SQLAlchemy 模型时，同时用 `uv run alembic revision --autogenerate` 生成
+迁移脚本，人工审查后再执行 `uv run alembic upgrade head`。
+
 只修改文档时可以不运行应用测试，但需要检查文档中的命令和路径仍然有效。
 
 ## 配置与密钥
@@ -52,6 +55,8 @@ uv run pytest -q
 - `app/main.py`：FastAPI 生命周期、登录保护、SSR 页面与表单路由。
 - `app/config.py`：环境变量读取、运行时配置和存储目录初始化。
 - `app/models.py`：SQLAlchemy 数据模型和通话主状态集合。
+- `alembic/`：数据库迁移脚本；初始版本含完整新 schema，种子版本预置字典、
+  权限和岗位角色。
 - `app/services/plans.py`：计划校验、下一次执行时间、任务入队和重启恢复。
 - `app/scheduler.py`：APScheduler 定时扫描，只负责把到期计划放入队列。
 - `app/services/call_worker.py`：单通道任务消费者；当前只有领取任务和前置校验
@@ -80,8 +85,9 @@ uv run pytest -q
   未来执行时间。
 - 自动重试上限和延迟来自配置。重试必须创建可追踪的尝试记录，不能原地无限
   循环或阻塞 Scheduler。
-- 第一版数据库通过启动时建表，不主动引入 Alembic。需要破坏性 schema 变更时
-  必须先说明现有 SQLite 数据的兼容和迁移方案。
+- 数据库结构由 Alembic 管理：修改模型后生成迁移脚本，部署执行
+  `uv run alembic upgrade head`；应用启动只校验 schema 版本与代码一致，
+  不再 `create_all` 自动变更结构（见 docs/migration-plan.md）。
 
 ## 实现风格
 

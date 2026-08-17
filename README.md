@@ -15,11 +15,14 @@ expanded product baselines are in:
 uv sync
 cp .env.example .env
 # edit ADMIN_PASSWORD and SESSION_SECRET before starting
+uv run alembic upgrade head
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 The web app refuses to start when `ADMIN_PASSWORD` is blank or left as
-`change-me`.
+`change-me`, and when the SQLite schema is not at the Alembic head revision.
+Schema changes are made through `alembic` migrations; the app never mutates
+the schema itself.
 
 ## Hardware smoke test
 

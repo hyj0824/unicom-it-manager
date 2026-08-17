@@ -14,7 +14,7 @@
         </label>
         <label>
           Phone
-          <input name="phone" value="{{ form_data.get('phone', edit_customer.phone if edit_customer else '') }}" placeholder="Enter phone number" required>
+          <input name="phone" value="{{ form_data.get('phone', customer_phones.get(edit_customer.id, '') if edit_customer else '') }}" placeholder="Enter phone number" required>
         </label>
         <label>
           Notes
@@ -44,7 +44,7 @@
           {% for customer in customers %}
             <tr>
               <td>{{ customer.name }}</td>
-              <td>{{ customer.phone }}</td>
+              <td>{{ customer_phones.get(customer.id, '') }}</td>
               <td>{{ customer.created_at|dt }}</td>
               <td class="actions">
                 <a class="button secondary small" href="/customers?edit_id={{ customer.id }}">Edit</a>

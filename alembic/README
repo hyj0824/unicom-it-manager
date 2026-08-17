@@ -1,0 +1,17 @@
+# Alembic 迁移
+
+- `env.py`：从应用配置（`.env` 的 `DATABASE_URL`）读取数据库 URL；测试可通过
+  `config.set_main_option("sqlalchemy.url", ...)` 覆盖。
+- 常用命令（在仓库根目录执行）：
+
+```bash
+uv run alembic upgrade head                 # 升级到最新版本
+uv run alembic downgrade -1                 # 回滚一个版本
+uv run alembic revision --autogenerate -m "..."   # 按模型差异生成迁移，需人工审查
+uv run alembic current                      # 查看当前数据库版本
+```
+
+- 应用启动时只校验 schema 版本与代码 head 一致，不会自动建表或迁移。
+- 初始版本 `b4127c1a2567`（完整新 schema）+ 种子版本 `96085cfcc38f`（字典、
+  权限、岗位角色），见 `docs/data-model-baseline.md` 和
+  `docs/permission-workflow-baseline.md`。

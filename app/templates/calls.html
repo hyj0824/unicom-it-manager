@@ -10,6 +10,7 @@
         <tr>
           <th>Due</th>
           <th>Customer</th>
+          <th>Number</th>
           <th>Script</th>
           <th>Status</th>
           <th>Attempt</th>
@@ -21,13 +22,14 @@
           <tr>
             <td>{{ task.due_at|dt }}</td>
             <td>{{ task.customer.name }}</td>
+            <td class="mono">{{ task.dial_number or "-" }}</td>
             <td>{{ task.script.title }}</td>
             <td><span class="status-pill {{ task.status }}">{{ task.status }}</span></td>
             <td>{{ task.attempt }}/{{ task.max_attempts }}</td>
             <td>{{ task.error_message or "-" }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="6" class="empty">No queued tasks yet.</td></tr>
+          <tr><td colspan="7" class="empty">No queued tasks yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -42,6 +44,7 @@
         <tr>
           <th>Created</th>
           <th>Customer</th>
+          <th>Number</th>
           <th>Script</th>
           <th>Status</th>
           <th>Connected</th>
@@ -54,6 +57,7 @@
           <tr>
             <td>{{ record.created_at|dt }}</td>
             <td>{{ record.customer.name }}</td>
+            <td class="mono">{{ record.dial_number or "-" }}</td>
             <td>{{ record.script.title }}</td>
             <td><span class="status-pill {{ record.status }}">{{ record.status }}</span></td>
             <td>{{ record.connected_at|dt }}</td>
@@ -61,7 +65,7 @@
             <td class="actions"><a class="button secondary small" href="/calls/{{ record.id }}">Detail</a></td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="empty">No call records yet.</td></tr>
+          <tr><td colspan="8" class="empty">No call records yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

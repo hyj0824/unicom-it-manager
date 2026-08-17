@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -19,10 +20,11 @@ from .config import (
     get_settings,
     validate_runtime_settings,
 )
-from .database import SessionLocal, get_db, init_db
+from .database import SessionLocal, check_schema_current, get_db
 from .models import CallEvent, CallRecord, CallTask, CallbackPlan, Customer, Script, utcnow
 from .scheduler import scheduler_service
 from .services import plans as plan_service
+from .services.customers import customer_phone_map, sync_default_contact
 from .services.scripts import generate_script_audio
 from .services.settings import (
     SCHEDULER_ENABLED_KEY,
@@ -66,7 +68,7 @@ templates.env.filters["datetime_local"] = datetime_local_filter
 async def lifespan(app: FastAPI):
     validate_runtime_settings(settings)
     ensure_storage_paths(settings)
-    init_db()
+    check_schema_current()
     with SessionLocal() as db:
         ensure_default_settings(db)
         db.commit()
@@ -224,6 +226,7 @@ def customers_template(
         db,
         status_code=status_code,
         customers=customers,
+        customer_phones=customer_phone_map(db, customers),
         edit_customer=edit_customer,
         form_data=form_data or {},
         error=error,
@@ -253,7 +256,10 @@ async def customer_create(request: Request, db: Session = Depends(get_db)):
         return customers_template(request, db, "Name is required.", form_data, status_code=400)
     if not plan_service.validate_phone(phone):
         return customers_template(request, db, "Phone must match +?[0-9]{5,20}.", form_data, status_code=400)
-    db.add(Customer(name=name, phone=phone, notes=notes))
+    customer = Customer(name=name, notes=notes)
+    db.add(customer)
+    db.flush()
+    sync_default_contact(db, customer, phone)
     db.commit()
     return redirect_to("/customers")
 
@@ -271,8 +277,9 @@ async def customer_update(customer_id: int, request: Request, db: Session = Depe
     if not plan_service.validate_phone(phone):
         return customers_template(request, db, "Phone must match +?[0-9]{5,20}.", edit_customer=customer, status_code=400)
     customer.name = name
-    customer.phone = phone
     customer.notes = notes
+    customer.version += 1
+    sync_default_contact(db, customer, phone)
     db.commit()
     return redirect_to("/customers")
 
@@ -281,8 +288,17 @@ async def customer_update(customer_id: int, request: Request, db: Session = Depe
 def customer_delete(customer_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_admin(request)
     customer = get_or_404(db, Customer, customer_id)
-    db.delete(customer)
-    db.commit()
+    try:
+        db.delete(customer)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return customers_template(
+            request,
+            db,
+            "This customer is referenced by plans, call records or business services and cannot be deleted.",
+            status_code=400,
+        )
     return redirect_to("/customers")
 
 
@@ -355,8 +371,17 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
 def script_delete(script_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_admin(request)
     script = get_or_404(db, Script, script_id)
-    db.delete(script)
-    db.commit()
+    try:
+        db.delete(script)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return scripts_template(
+            request,
+            db,
+            "This script is referenced by plans or call records and cannot be deleted.",
+            status_code=400,
+        )
     return redirect_to("/scripts")
 
 
@@ -388,6 +413,7 @@ def plans_template(
         plans=plans,
         customers=customers,
         scripts=scripts,
+        customer_phones=customer_phone_map(db, customers),
         edit_plan=edit_plan,
         form_data=form_data or {},
         error=error,
@@ -449,8 +475,17 @@ async def plan_update(plan_id: int, request: Request, db: Session = Depends(get_
 def plan_delete(plan_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_admin(request)
     plan = get_or_404(db, CallbackPlan, plan_id)
-    db.delete(plan)
-    db.commit()
+    try:
+        db.delete(plan)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return plans_template(
+            request,
+            db,
+            "This plan is referenced by queued tasks or call records and cannot be deleted.",
+            status_code=400,
+        )
     return redirect_to("/plans")
 
 
@@ -473,6 +508,7 @@ def plan_call_now(plan_id: int, request: Request, db: Session = Depends(get_db))
         due_at=utcnow(),
         status="queued",
         message="Manual call requested from the web UI.",
+        source="manual",
     )
     db.commit()
     return redirect_to("/calls")
