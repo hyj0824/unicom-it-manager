@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}Callback Demo{% endblock %}</title>
+    <title>{% block title %}{{ app_title }}{% endblock %}</title>
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body class="{% if not is_authenticated %}auth-page{% endif %}">
@@ -11,34 +11,51 @@
       {% set path = request.url.path %}
       <aside class="sidebar">
         <div class="brand">
-          <span class="brand-mark">CB</span>
-          <span>Callback Demo</span>
+          <span class="brand-mark">政企</span>
+          <span>{{ app_title }}</span>
         </div>
         <nav class="nav">
-          <a class="{% if path == '/' %}active{% endif %}" href="/">Dashboard</a>
-          <a class="{% if path.startswith('/customers') %}active{% endif %}" href="/customers">Customers</a>
-          <a class="{% if path.startswith('/scripts') %}active{% endif %}" href="/scripts">Scripts</a>
-          <a class="{% if path.startswith('/plans') %}active{% endif %}" href="/plans">Plans</a>
-          <a class="{% if path.startswith('/calls') %}active{% endif %}" href="/calls">Calls</a>
+          <a class="{% if path == '/' %}active{% endif %}" href="/">工作台</a>
+          <a class="{% if path.startswith('/ledger') %}active{% endif %}" href="/ledger">业务台账</a>
+          <a class="{% if path.startswith('/devices') %}active{% endif %}" href="/devices">网络设备</a>
+          <a class="{% if path.startswith('/customers') or path.startswith('/contacts') %}active{% endif %}" href="/customers">客户管理</a>
+          <a class="{% if path.startswith('/reviews') %}active{% endif %}" href="/reviews">审核中心</a>
+          <a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>
+          <a class="{% if path.startswith('/imports') %}active{% endif %}" href="/imports">导入导出</a>
+          <div class="nav-group">
+            <span class="nav-label">回访与通话</span>
+            <a class="{% if path.startswith('/plans') %}active{% endif %}" href="/plans">回访计划</a>
+            <a class="{% if path.startswith('/scripts') %}active{% endif %}" href="/scripts">话术管理</a>
+            <a class="{% if path.startswith('/calls') %}active{% endif %}" href="/calls">通话记录</a>
+          </div>
+          <div class="nav-group">
+            <span class="nav-label">系统管理</span>
+            <a class="{% if path.startswith('/admin/users') %}active{% endif %}" href="/admin/users">用户管理</a>
+            <a class="{% if path.startswith('/admin/roles') %}active{% endif %}" href="/admin/roles">角色权限</a>
+            <a class="{% if path.startswith('/admin/dictionaries') %}active{% endif %}" href="/admin/dictionaries">字典管理</a>
+          </div>
         </nav>
       </aside>
       <main class="shell">
         <header class="topbar">
           <div>
-            <div class="eyebrow">Rock Pi 3A local admin</div>
-            <h1>{% block page_title %}Dashboard{% endblock %}</h1>
+            <div class="eyebrow">Rock Pi 3A 内网管理</div>
+            <h1>{% block page_title %}工作台{% endblock %}</h1>
           </div>
           <div class="topbar-actions">
+            {% if current_user %}
+              <span class="user-chip">{{ current_user.name }}</span>
+            {% endif %}
             <span class="status-pill {% if scheduler_enabled %}ok{% else %}muted{% endif %}">
-              Scheduler {{ "running" if scheduler_enabled else "paused" }}
+              调度器 {{ "运行中" if scheduler_enabled else "已暂停" }}
             </span>
             <form method="post" action="/settings/scheduler">
               <input type="hidden" name="enabled" value="{{ 0 if scheduler_enabled else 1 }}">
               <input type="hidden" name="next" value="{{ request.url.path }}">
-              <button class="button secondary" type="submit">{{ "Pause" if scheduler_enabled else "Resume" }}</button>
+              <button class="button secondary" type="submit">{{ "暂停调度" if scheduler_enabled else "恢复调度" }}</button>
             </form>
             <form method="post" action="/logout">
-              <button class="button ghost" type="submit">Sign out</button>
+              <button class="button ghost" type="submit">退出登录</button>
             </form>
           </div>
         </header>

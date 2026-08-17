@@ -1,63 +1,118 @@
 {% extends "base.html" %}
-{% block page_title %}Customers{% endblock %}
+{% block page_title %}客户管理{% endblock %}
 {% block content %}
   <div class="grid form-list">
     <section class="panel">
       <div class="panel-head">
-        <h2>{{ "Edit customer" if edit_customer else "New customer" }}</h2>
+        <h2>{{ "编辑客户" if edit_customer else "新增客户" }}</h2>
       </div>
       {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
       <form class="stack" method="post" action="{{ '/customers/' ~ edit_customer.id ~ '/edit' if edit_customer else '/customers' }}">
         <label>
-          Name
+          客户名称
           <input name="name" value="{{ form_data.get('name', edit_customer.name if edit_customer else '') }}" required>
         </label>
         <label>
-          Phone
-          <input name="phone" value="{{ form_data.get('phone', customer_phones.get(edit_customer.id, '') if edit_customer else '') }}" placeholder="Enter phone number" required>
-        </label>
-        <label>
-          Notes
-          <textarea name="notes" rows="5">{{ form_data.get('notes', edit_customer.notes if edit_customer else '') }}</textarea>
+          备注
+          <textarea name="notes" rows="4">{{ form_data.get('notes', edit_customer.notes if edit_customer else '') }}</textarea>
         </label>
         <div class="button-row">
-          <button class="button primary" type="submit">{{ "Save changes" if edit_customer else "Create customer" }}</button>
-          {% if edit_customer %}<a class="button ghost" href="/customers">Cancel</a>{% endif %}
+          <button class="button primary" type="submit">{{ "保存修改" if edit_customer else "创建客户" }}</button>
+          {% if edit_customer %}<a class="button ghost" href="/customers">取消</a>{% endif %}
         </div>
       </form>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Customer list</h2>
+        <h2>客户列表</h2>
       </div>
       <table>
         <thead>
-          <tr>
-            <th>Name</th>
-            <th>Phone</th>
-            <th>Created</th>
-            <th class="actions-col">Actions</th>
-          </tr>
+          <tr><th>客户名称</th><th>默认外呼电话</th><th>创建时间</th><th class="actions-col">操作</th></tr>
         </thead>
         <tbody>
           {% for customer in customers %}
             <tr>
               <td>{{ customer.name }}</td>
-              <td>{{ customer_phones.get(customer.id, '') }}</td>
+              <td class="mono">{{ customer_phones.get(customer.id, "-") }}</td>
               <td>{{ customer.created_at|dt }}</td>
               <td class="actions">
-                <a class="button secondary small" href="/customers?edit_id={{ customer.id }}">Edit</a>
-                <form method="post" action="/customers/{{ customer.id }}/delete" data-confirm="Delete this customer?">
-                  <button class="button danger small" type="submit">Delete</button>
+                <a class="button secondary small" href="/customers?edit_id={{ customer.id }}">编辑</a>
+                <form method="post" action="/customers/{{ customer.id }}/delete" data-confirm="删除该客户？">
+                  <button class="button danger small" type="submit">删除</button>
                 </form>
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="4" class="empty">No customers yet.</td></tr>
+            <tr><td colspan="4" class="empty">暂无客户。</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </section>
   </div>
+
+  {% if edit_customer %}
+    <div class="grid two">
+      <section class="panel">
+        <div class="panel-head"><h2>{{ edit_customer.name }} 的联系人</h2></div>
+        <table>
+          <thead>
+            <tr><th>姓名</th><th>电话</th><th>职责</th><th>状态</th><th class="actions-col">操作</th></tr>
+          </thead>
+          <tbody>
+            {% for link in contacts %}
+              <tr>
+                <td>{{ link.contact.name or "-" }}</td>
+                <td class="mono">{{ link.contact.phone or "-" }}</td>
+                <td>{{ link.duty or "默认外呼联系人" }}</td>
+                <td><span class="status-pill {% if link.is_active %}ok{% else %}muted{% endif %}">{{ "有效" if link.is_active else "停用" }}</span></td>
+                <td class="actions">
+                  <a class="button secondary small" href="/customers?edit_id={{ edit_customer.id }}&edit_contact_id={{ link.contact.id }}">编辑</a>
+                  <form method="post" action="/contacts/{{ link.contact.id }}/delete?customer_id={{ edit_customer.id }}" data-confirm="删除该联系人？">
+                    <button class="button danger small" type="submit">删除</button>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5" class="empty">该客户还没有联系人。</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>{{ "编辑联系人" if edit_contact_id else "新增联系人" }}</h2>
+        </div>
+        {% if contact_error %}<div class="alert error">{{ contact_error }}</div>{% endif %}
+        {% set editing_contact = namespace(found=none) %}
+        {% for link in contacts %}
+          {% if link.contact.id == edit_contact_id %}{% set editing_contact.found = link %}{% endif %}
+        {% endfor %}
+        <form class="stack" method="post"
+              action="{{ '/contacts/' ~ edit_contact_id ~ '/edit' if edit_contact_id else '/customers/' ~ edit_customer.id ~ '/contacts' }}">
+          {% if edit_contact_id %}<input type="hidden" name="customer_id" value="{{ edit_customer.id }}">{% endif %}
+          <label>
+            姓名
+            <input name="name" value="{{ contact_form.get('name', editing_contact.found.contact.name or '' if editing_contact.found else '') }}">
+          </label>
+          <label>
+            电话
+            <input name="phone" value="{{ contact_form.get('phone', editing_contact.found.contact.phone or '' if editing_contact.found else '') }}" placeholder="+?[0-9]{5,20}">
+          </label>
+          <label>
+            职责
+            <select name="duty">
+              <option value="">默认外呼联系人</option>
+              {% for duty in duties %}
+                <option value="{{ duty.label }}" {% if (contact_form.get('duty') or (editing_contact.found.duty if editing_contact.found else '')) == duty.label %}selected{% endif %}>{{ duty.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="button primary" type="submit">{{ "保存修改" if edit_contact_id else "添加联系人" }}</button>
+        </form>
+      </section>
+    </div>
+  {% endif %}
 {% endblock %}

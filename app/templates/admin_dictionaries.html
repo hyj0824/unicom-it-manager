@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block page_title %}字典管理{% endblock %}
+{% block content %}
+  <div class="grid two">
+    {% for category in categories %}
+      <section class="panel">
+        <div class="panel-head">
+          <h2>{{ category.label }} <span class="subtle mono">{{ category.code }}</span></h2>
+        </div>
+        <table>
+          <thead><tr><th>字典项</th><th>代码</th><th>状态</th></tr></thead>
+          <tbody>
+            {% for item in category.items %}
+              {% if item.is_active %}
+                <tr>
+                  <td>{{ item.label }}</td>
+                  <td class="mono">{{ item.code or "-" }}</td>
+                  <td><span class="status-pill ok">启用</span></td>
+                </tr>
+              {% endif %}
+            {% else %}
+              <tr><td colspan="3" class="empty">该分类暂无字典项。</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    {% endfor %}
+  </div>
+{% endblock %}

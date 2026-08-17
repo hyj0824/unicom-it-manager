@@ -1,54 +1,54 @@
 {% extends "base.html" %}
-{% block page_title %}Call detail{% endblock %}
+{% block page_title %}通话详情{% endblock %}
 {% block content %}
   <div class="grid two">
     <section class="panel">
       <div class="panel-head">
-        <h2>Record</h2>
-        <a class="button secondary" href="/calls">Back</a>
+        <h2>通话信息</h2>
+        <a class="button secondary" href="/calls">返回</a>
       </div>
       <dl class="detail-list">
-        <dt>Customer</dt><dd>{{ record.customer.name }}</dd>
-        <dt>Dial number</dt><dd class="mono">{{ record.dial_number or "-" }}</dd>
-        <dt>Script</dt><dd>{{ record.script.title }}</dd>
-        <dt>Status</dt><dd><span class="status-pill {{ record.status }}">{{ record.status }}</span></dd>
-        <dt>Dialing started</dt><dd>{{ record.dialing_started_at|dt }}</dd>
-        <dt>Connected</dt><dd>{{ record.connected_at|dt }}</dd>
-        <dt>Ended</dt><dd>{{ record.ended_at|dt }}</dd>
-        <dt>Duration</dt><dd>{{ record.duration_seconds or "-" }}</dd>
-        <dt>Error</dt><dd>{{ record.error_message or "-" }}</dd>
+        <dt>客户</dt><dd>{{ record.customer.name }}</dd>
+        <dt>拨号号码</dt><dd class="mono">{{ record.dial_number or "-" }}</dd>
+        <dt>话术</dt><dd>{{ record.script.title }}</dd>
+        <dt>状态</dt><dd><span class="status-pill {{ record.status }}">{{ record.status }}</span></dd>
+        <dt>开始拨号</dt><dd>{{ record.dialing_started_at|dt }}</dd>
+        <dt>接通</dt><dd>{{ record.connected_at|dt }}</dd>
+        <dt>结束</dt><dd>{{ record.ended_at|dt }}</dd>
+        <dt>时长（秒）</dt><dd>{{ record.duration_seconds or "-" }}</dd>
+        <dt>错误</dt><dd>{{ record.error_message or "-" }}</dd>
       </dl>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Operator result</h2>
+        <h2>操作员回访结果</h2>
       </div>
       <form class="stack" method="post" action="/calls/{{ record.id }}/feedback">
         <label>
-          Feedback
+          回访反馈
           <textarea name="operator_feedback" rows="6">{{ record.operator_feedback }}</textarea>
         </label>
         <label class="check">
           <input type="checkbox" name="follow_up_required" {% if record.follow_up_required %}checked{% endif %}>
-          Follow up required
+          需要人工跟进
         </label>
-        <button class="button primary" type="submit">Save feedback</button>
+        <button class="button primary" type="submit">保存反馈</button>
       </form>
     </section>
   </div>
 
   <section class="panel">
     <div class="panel-head">
-      <h2>Events</h2>
+      <h2>事件时间线</h2>
     </div>
     <table>
       <thead>
         <tr>
-          <th>Time</th>
-          <th>Type</th>
-          <th>Message</th>
-          <th>Raw</th>
+          <th>时间</th>
+          <th>类型</th>
+          <th>消息</th>
+          <th>原始串口行</th>
         </tr>
       </thead>
       <tbody>
@@ -60,7 +60,7 @@
             <td class="mono">{{ event.raw_line or "-" }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="4" class="empty">No events yet.</td></tr>
+          <tr><td colspan="4" class="empty">暂无事件。</td></tr>
         {% endfor %}
       </tbody>
     </table>

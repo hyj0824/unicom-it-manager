@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block page_title %}导入报告{% endblock %}
+{% block content %}
+  <section class="panel">
+    <div class="panel-head">
+      <h2>{{ batch.file_name }}</h2>
+      <a class="button secondary small" href="/imports">返回导入导出</a>
+    </div>
+    <div class="summary-grid">
+      <div><span>总行数</span><strong>{{ batch.total_rows }}</strong></div>
+      <div><span>错误行</span><strong>{{ batch.error_count }}</strong></div>
+      <div><span>含重复/冲突行</span><strong>{{ batch.duplicate_count }}</strong></div>
+      <div><span>缺项行</span><strong>{{ batch.missing_count }}</strong></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>暂存行明细</h2>
+      <form class="filter-bar inline" method="get" action="/imports/{{ batch.id }}">
+        <select name="status_filter" onchange="this.form.submit()">
+          <option value="">全部（{{ batch.total_rows }}）</option>
+          {% for status in ["valid", "missing", "error", "duplicate"] %}
+            <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}（{{ status_counts[status] }}）</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+    <table>
+      <thead>
+        <tr><th>行号</th><th>业务号码</th><th>客户名称</th><th>县分</th><th>网格</th><th>校验结果</th><th>错误信息</th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.row_number }}</td>
+            <td class="mono">{{ row.mapped_json|from_json_map("service_number") }}</td>
+            <td>{{ row.mapped_json|from_json_map("customer_name") }}</td>
+            <td>{{ row.mapped_json|from_json_map("county") }}</td>
+            <td>{{ row.mapped_json|from_json_map("grid") }}</td>
+            <td>
+              {% if row.status == "valid" %}<span class="status-pill ok">正常</span>
+              {% elif row.status == "missing" %}<span class="status-pill short_call">缺项</span>
+              {% elif row.status == "duplicate" %}<span class="status-pill warning">重复</span>
+              {% else %}<span class="status-pill error">错误</span>{% endif %}
+            </td>
+            <td class="mono">{{ row.error_messages or "-" }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="empty">该批次没有暂存行。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="subtle" style="padding: 0 18px 18px;">
+      原始行内容与列映射保存在暂存区，可追溯；审核通过并应用正式库的功能在后续版本提供。
+    </p>
+  </section>
+{% endblock %}

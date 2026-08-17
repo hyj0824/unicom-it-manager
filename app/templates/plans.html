@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block page_title %}Plans{% endblock %}
+{% block page_title %}回访计划{% endblock %}
 {% block content %}
   <div class="grid form-list">
     <section class="panel">
       <div class="panel-head">
-        <h2>{{ "Edit plan" if edit_plan else "New plan" }}</h2>
+        <h2>{{ "编辑计划" if edit_plan else "新增计划" }}</h2>
       </div>
       {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
       {% set selected_customer = form_data.get('customer_id', edit_plan.customer_id if edit_plan else '') %}
@@ -14,66 +14,66 @@
       {% set enabled_checked = (form_data and form_data.get('enabled') == 'on') or ((not form_data) and (not edit_plan or edit_plan.enabled)) %}
       <form class="stack" method="post" action="{{ '/plans/' ~ edit_plan.id ~ '/edit' if edit_plan else '/plans' }}">
         <label>
-          Customer
+          客户
           <select name="customer_id" required>
-            <option value="">Select customer</option>
+            <option value="">选择客户</option>
             {% for customer in customers %}
-              <option value="{{ customer.id }}" {% if selected_customer|string == customer.id|string %}selected{% endif %}>{{ customer.name }} - {{ customer_phones.get(customer.id, '') }}</option>
+              <option value="{{ customer.id }}" {% if selected_customer|string == customer.id|string %}selected{% endif %}>{{ customer.name }} - {{ customer_phones.get(customer.id, '无默认联系人') }}</option>
             {% endfor %}
           </select>
         </label>
         <label>
-          Script
+          话术
           <select name="script_id" required>
-            <option value="">Select script</option>
+            <option value="">选择话术</option>
             {% for script in scripts %}
               <option value="{{ script.id }}" {% if selected_script|string == script.id|string %}selected{% endif %}>{{ script.title }}</option>
             {% endfor %}
           </select>
         </label>
         <label>
-          Trigger
+          触发方式
           <select name="trigger_type">
-            <option value="once" {% if selected_trigger == 'once' %}selected{% endif %}>once</option>
-            <option value="cron" {% if selected_trigger == 'cron' %}selected{% endif %}>cron</option>
+            <option value="once" {% if selected_trigger == 'once' %}selected{% endif %}>单次（once）</option>
+            <option value="cron" {% if selected_trigger == 'cron' %}selected{% endif %}>周期（cron）</option>
           </select>
         </label>
         <label>
-          Run at
+          执行时间
           <input type="datetime-local" name="run_at" value="{{ form_data.get('run_at', edit_plan.run_at|datetime_local(selected_timezone) if edit_plan else '') }}">
         </label>
         <label>
-          Cron expression
+          Cron 表达式
           <input name="cron_expr" value="{{ form_data.get('cron_expr', edit_plan.cron_expr if edit_plan else '') }}" placeholder="0 9 * * *">
         </label>
         <label>
-          Timezone
+          时区
           <input name="timezone" value="{{ selected_timezone }}">
         </label>
         <label class="check">
           <input type="checkbox" name="enabled" {% if enabled_checked %}checked{% endif %}>
-          Enabled
+          启用
         </label>
         <div class="button-row">
-          <button class="button primary" type="submit">{{ "Save changes" if edit_plan else "Create plan" }}</button>
-          {% if edit_plan %}<a class="button ghost" href="/plans">Cancel</a>{% endif %}
+          <button class="button primary" type="submit">{{ "保存修改" if edit_plan else "创建计划" }}</button>
+          {% if edit_plan %}<a class="button ghost" href="/plans">取消</a>{% endif %}
         </div>
       </form>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Plan list</h2>
+        <h2>计划列表</h2>
       </div>
       <table>
         <thead>
           <tr>
-            <th>Customer</th>
-            <th>Script</th>
-            <th>Trigger</th>
-            <th>Next run</th>
-            <th>Status</th>
-            <th class="actions-col">Actions</th>
+            <th>客户</th>
+            <th>话术</th>
+            <th>触发</th>
+            <th>下次执行</th>
+            <th>状态</th>
+            <th class="actions-col">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -83,22 +83,22 @@
               <td>{{ plan.script.title }}</td>
               <td>{{ plan.trigger_type }}{% if plan.cron_expr %}<span class="subtle mono"> {{ plan.cron_expr }}</span>{% endif %}</td>
               <td>{{ plan.next_run_at|dt(plan.timezone) }}</td>
-              <td><span class="status-pill {% if plan.enabled %}ok{% else %}muted{% endif %}">{{ "enabled" if plan.enabled else "paused" }}</span></td>
+              <td><span class="status-pill {% if plan.enabled %}ok{% else %}muted{% endif %}">{{ "启用" if plan.enabled else "暂停" }}</span></td>
               <td class="actions">
-                <form method="post" action="/plans/{{ plan.id }}/call-now">
-                  <button class="button primary small" type="submit">Call now</button>
+                <form method="post" action="/plans/{{ plan.id }}/call-now" data-confirm="立即拨打一次该计划的默认联系人？">
+                  <button class="button primary small" type="submit">立即拨打</button>
                 </form>
-                <a class="button secondary small" href="/plans?edit_id={{ plan.id }}">Edit</a>
+                <a class="button secondary small" href="/plans?edit_id={{ plan.id }}">编辑</a>
                 <form method="post" action="/plans/{{ plan.id }}/toggle">
-                  <button class="button secondary small" type="submit">{{ "Pause" if plan.enabled else "Enable" }}</button>
+                  <button class="button secondary small" type="submit">{{ "暂停" if plan.enabled else "启用" }}</button>
                 </form>
-                <form method="post" action="/plans/{{ plan.id }}/delete" data-confirm="Delete this plan?">
-                  <button class="button danger small" type="submit">Delete</button>
+                <form method="post" action="/plans/{{ plan.id }}/delete" data-confirm="删除该计划？">
+                  <button class="button danger small" type="submit">删除</button>
                 </form>
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="empty">No plans yet.</td></tr>
+            <tr><td colspan="6" class="empty">暂无计划。</td></tr>
           {% endfor %}
         </tbody>
       </table>

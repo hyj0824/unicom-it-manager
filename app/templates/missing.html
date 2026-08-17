@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block page_title %}缺项工作台{% endblock %}
+{% block content %}
+  <div class="grid two">
+    <section class="panel">
+      <div class="panel-head"><h2>业务实例缺项</h2></div>
+      <table>
+        <thead><tr><th>字段</th><th>缺失行数</th></tr></thead>
+        <tbody>
+          {% for row in business_rows %}
+            <tr>
+              <td>{{ row.field }}</td>
+              <td><span class="status-pill short_call">{{ row.count }}</span></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="2" class="empty">业务实例暂无缺项。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>设备缺项</h2></div>
+      <table>
+        <thead><tr><th>字段</th><th>缺失行数</th></tr></thead>
+        <tbody>
+          {% for row in device_rows %}
+            <tr>
+              <td>{{ row.field }}</td>
+              <td><span class="status-pill short_call">{{ row.count }}</span></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="2" class="empty">设备暂无缺项。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head"><h2>含缺项的导入批次</h2></div>
+    <table>
+      <thead><tr><th>文件</th><th>导入时间</th><th>总行数</th><th>缺项行数</th><th>操作</th></tr></thead>
+      <tbody>
+        {% for batch in recent_batches %}
+          <tr>
+            <td>{{ batch.file_name }}</td>
+            <td>{{ batch.created_at|dt }}</td>
+            <td>{{ batch.total_rows }}</td>
+            <td>{{ batch.missing_count }}</td>
+            <td class="actions"><a class="button secondary small" href="/imports/{{ batch.id }}">查看</a></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="empty">暂无含缺项的导入批次。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

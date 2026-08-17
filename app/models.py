@@ -317,6 +317,17 @@ class BusinessService(TimestampMixin, Base):
     devices: Mapped[list["NetworkDevice"]] = relationship(
         back_populates="business_service", cascade="all, delete-orphan"
     )
+    county_item: Mapped["DictionaryItem | None"] = relationship(foreign_keys=[county_item_id])
+    grid_item: Mapped["DictionaryItem | None"] = relationship(foreign_keys=[grid_item_id])
+    service_status_item: Mapped["DictionaryItem | None"] = relationship(
+        foreign_keys=[service_status_item_id]
+    )
+    business_type_item: Mapped["DictionaryItem | None"] = relationship(
+        foreign_keys=[business_type_item_id]
+    )
+    data_quality_status_item: Mapped["DictionaryItem | None"] = relationship(
+        foreign_keys=[data_quality_status_item_id]
+    )
 
 
 class NetworkDevice(TimestampMixin, Base):
@@ -353,6 +364,19 @@ class NetworkDevice(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     business_service: Mapped[BusinessService] = relationship(back_populates="devices")
+    asset_class_item: Mapped["DictionaryItem | None"] = relationship(
+        foreign_keys=[asset_class_item_id]
+    )
+    device_type_item: Mapped["DictionaryItem | None"] = relationship(
+        foreign_keys=[device_type_item_id]
+    )
+    recovery_status_item: Mapped["DictionaryItem | None"] = relationship(
+        foreign_keys=[recovery_status_item_id]
+    )
+    recovery_reason_item: Mapped["DictionaryItem | None"] = relationship(
+        foreign_keys=[recovery_reason_item_id]
+    )
+    maintenance_contact: Mapped["CustomerContact | None"] = relationship()
 
 
 class ChangeSet(TimestampMixin, Base):

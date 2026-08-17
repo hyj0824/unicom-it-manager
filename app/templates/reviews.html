@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block page_title %}审核中心{% endblock %}
+{% block content %}
+  <section class="panel">
+    <div class="panel-head">
+      <h2>变更申请</h2>
+      <form class="filter-bar inline" method="get" action="/reviews">
+        <select name="status_filter" onchange="this.form.submit()">
+          <option value="">全部状态</option>
+          {% for status in ["draft", "submitted", "returned", "approved", "rejected", "applied", "cancelled"] %}
+            <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}（{{ status_counts[status] }}）</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+    <table>
+      <thead>
+        <tr><th>标题</th><th>域</th><th>状态</th><th>提交人</th><th>提交时间</th><th>原因</th></tr>
+      </thead>
+      <tbody>
+        {% for change_set in change_sets %}
+          <tr>
+            <td>{{ change_set.title or "-" }}</td>
+            <td>{{ change_set.domain }}</td>
+            <td><span class="status-pill muted">{{ change_set.status }}</span></td>
+            <td>{{ change_set.created_by_user_id or "-" }}</td>
+            <td>{{ change_set.submitted_at|dt or "-" }}</td>
+            <td>{{ change_set.reason or "-" }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6" class="empty">
+              暂无变更申请。导入批次或台账编辑提交审核后，将在这里进行“当前值 / 提交值”对比与审核。
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

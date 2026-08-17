@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block page_title %}导入导出{% endblock %}
+{% block content %}
+  <div class="grid form-list">
+    <section class="panel">
+      <div class="panel-head"><h2>上传台账</h2></div>
+      {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+      <form class="stack" method="post" action="/imports/upload" enctype="multipart/form-data">
+        <label>
+          台账 XLSX（A-M 业务，N-W 设备）
+          <input type="file" name="file" accept=".xlsx" required>
+        </label>
+        <p class="subtle">
+          上传后仅进入暂存区并生成校验报告（类型、重复、格式、缺项），不会直接写入正式表；
+          经审核通过后才应用。
+        </p>
+        <button class="button primary" type="submit">上传并校验</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>导入批次</h2></div>
+      <table>
+        <thead>
+          <tr><th>文件</th><th>状态</th><th>总行数</th><th>错误</th><th>重复</th><th>缺项</th><th>导入时间</th><th class="actions-col">操作</th></tr>
+        </thead>
+        <tbody>
+          {% for batch in batches %}
+            <tr>
+              <td>{{ batch.file_name }}</td>
+              <td><span class="status-pill {% if batch.status == 'ready' %}ok{% else %}muted{% endif %}">{{ batch.status }}</span></td>
+              <td>{{ batch.total_rows }}</td>
+              <td>{% if batch.error_count %}<span class="status-pill error">{{ batch.error_count }}</span>{% else %}0{% endif %}</td>
+              <td>{% if batch.duplicate_count %}<span class="status-pill warning">{{ batch.duplicate_count }}</span>{% else %}0{% endif %}</td>
+              <td>{% if batch.missing_count %}<span class="status-pill short_call">{{ batch.missing_count }}</span>{% else %}0{% endif %}</td>
+              <td>{{ batch.created_at|dt }}</td>
+              <td class="actions"><a class="button secondary small" href="/imports/{{ batch.id }}">查看报告</a></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8" class="empty">暂无导入批次。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+{% endblock %}

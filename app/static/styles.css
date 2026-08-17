@@ -78,6 +78,84 @@ a {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.nav-group {
+  display: grid;
+  gap: 2px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nav-group .nav-label {
+  padding: 0 12px 4px;
+  color: #8d8d85;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.nav-group a {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--side-ink);
+  background: var(--side);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.filter-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.filter-bar input {
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+
+.filter-bar select {
+  flex: 0 1 auto;
+  width: auto;
+}
+
+.filter-bar.inline {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.check-grid .check {
+  font-weight: 500;
+}
+
+.login-hint {
+  margin: 8px 18px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .shell {
   margin-left: 232px;
   min-height: 100vh;
@@ -372,6 +450,23 @@ textarea {
 }
 
 .status-pill.muted {
+  color: #4b5563;
+  background: #e5e7eb;
+}
+
+.status-pill.warning,
+.status-pill.duplicate,
+.status-pill.returned,
+.status-pill.approved {
+  color: #4f3200;
+  background: #fdecc8;
+}
+
+.status-pill.draft,
+.status-pill.submitted,
+.status-pill.rejected,
+.status-pill.cancelled,
+.status-pill.applied {
   color: #4b5563;
   background: #e5e7eb;
 }

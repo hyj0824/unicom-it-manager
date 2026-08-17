@@ -1,20 +1,20 @@
 {% extends "base.html" %}
-{% block page_title %}Calls{% endblock %}
+{% block page_title %}通话记录{% endblock %}
 {% block content %}
   <section class="panel">
     <div class="panel-head">
-      <h2>Queue</h2>
+      <h2>任务队列</h2>
     </div>
     <table>
       <thead>
         <tr>
-          <th>Due</th>
-          <th>Customer</th>
-          <th>Number</th>
-          <th>Script</th>
-          <th>Status</th>
-          <th>Attempt</th>
-          <th>Error</th>
+          <th>执行时间</th>
+          <th>客户</th>
+          <th>号码</th>
+          <th>话术</th>
+          <th>状态</th>
+          <th>尝试</th>
+          <th>错误</th>
         </tr>
       </thead>
       <tbody>
@@ -29,7 +29,7 @@
             <td>{{ task.error_message or "-" }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="empty">No queued tasks yet.</td></tr>
+          <tr><td colspan="7" class="empty">暂无排队任务。</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -37,19 +37,19 @@
 
   <section class="panel">
     <div class="panel-head">
-      <h2>Call records</h2>
+      <h2>通话记录</h2>
     </div>
     <table>
       <thead>
         <tr>
-          <th>Created</th>
-          <th>Customer</th>
-          <th>Number</th>
-          <th>Script</th>
-          <th>Status</th>
-          <th>Connected</th>
-          <th>Duration</th>
-          <th class="actions-col">Actions</th>
+          <th>创建时间</th>
+          <th>客户</th>
+          <th>号码</th>
+          <th>话术</th>
+          <th>状态</th>
+          <th>接通时间</th>
+          <th>时长</th>
+          <th class="actions-col">操作</th>
         </tr>
       </thead>
       <tbody>
@@ -62,10 +62,10 @@
             <td><span class="status-pill {{ record.status }}">{{ record.status }}</span></td>
             <td>{{ record.connected_at|dt }}</td>
             <td>{{ record.duration_seconds or "-" }}</td>
-            <td class="actions"><a class="button secondary small" href="/calls/{{ record.id }}">Detail</a></td>
+            <td class="actions"><a class="button secondary small" href="/calls/{{ record.id }}">详情</a></td>
           </tr>
         {% else %}
-          <tr><td colspan="8" class="empty">No call records yet.</td></tr>
+          <tr><td colspan="8" class="empty">暂无通话记录。</td></tr>
         {% endfor %}
       </tbody>
     </table>

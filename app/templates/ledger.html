@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block page_title %}业务台账{% endblock %}
+{% block content %}
+  <div class="grid form-list">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>{{ "编辑业务" if edit_service else "新增业务" }}</h2>
+      </div>
+      {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+      {% set fd = form_data %}
+      <form class="stack" method="post" action="{{ '/ledger/' ~ edit_service.id ~ '/edit' if edit_service else '/ledger' }}">
+        <label>
+          业务号码
+          <input name="service_number" value="{{ fd.get('service_number', edit_service.service_number if edit_service else '') }}" required>
+        </label>
+        <label>
+          客户
+          <select name="customer_id" required>
+            <option value="">选择客户</option>
+            {% for customer in customers %}
+              <option value="{{ customer.id }}" {% if (fd.get('customer_id') or (edit_service.customer_id if edit_service else ''))|string == customer.id|string %}selected{% endif %}>{{ customer.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="grid two">
+          <label>
+            县分
+            <select name="county_item_id">
+              <option value="">未填</option>
+              {% for item in counties %}
+                <option value="{{ item.id }}" {% if (fd.get('county_item_id') or (edit_service.county_item_id if edit_service else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            网格
+            <select name="grid_item_id">
+              <option value="">未填</option>
+              {% for item in grids %}
+                <option value="{{ item.id }}" {% if (fd.get('grid_item_id') or (edit_service.grid_item_id if edit_service else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            服务状态
+            <select name="service_status_item_id">
+              <option value="">未填</option>
+              {% for item in service_statuses %}
+                <option value="{{ item.id }}" {% if (fd.get('service_status_item_id') or (edit_service.service_status_item_id if edit_service else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            业务类型
+            <select name="business_type_item_id">
+              <option value="">未填</option>
+              {% for item in business_types %}
+                <option value="{{ item.id }}" {% if (fd.get('business_type_item_id') or (edit_service.business_type_item_id if edit_service else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            入网时间
+            <input type="date" name="accessed_at" value="{{ fd.get('accessed_at', edit_service.accessed_at|date if edit_service else '') }}">
+          </label>
+          <label>
+            协议到期时间
+            <input type="date" name="agreement_expires_at" value="{{ fd.get('agreement_expires_at', edit_service.agreement_expires_at|date if edit_service else '') }}">
+          </label>
+        </div>
+        <label>
+          渠道名称
+          <input name="channel_name" value="{{ fd.get('channel_name', edit_service.channel_name if edit_service else '') }}">
+        </label>
+        <div class="button-row">
+          <button class="button primary" type="submit">{{ "保存修改" if edit_service else "创建业务" }}</button>
+          {% if edit_service %}<a class="button ghost" href="/ledger">取消</a>{% endif %}
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>业务列表</h2>
+      </div>
+      <form class="filter-bar" method="get" action="/ledger">
+        <input name="q" value="{{ q }}" placeholder="业务号码 / 客户名称">
+        <select name="county_id">
+          <option value="">全部县分</option>
+          {% for item in counties %}
+            <option value="{{ item.id }}" {% if county_id == item.id %}selected{% endif %}>{{ item.label }}</option>
+          {% endfor %}
+        </select>
+        <select name="status_id">
+          <option value="">全部服务状态</option>
+          {% for item in service_statuses %}
+            <option value="{{ item.id }}" {% if status_id == item.id %}selected{% endif %}>{{ item.label }}</option>
+          {% endfor %}
+        </select>
+        <button class="button secondary" type="submit">筛选</button>
+        <a class="button ghost" href="/ledger">重置</a>
+      </form>
+      <table>
+        <thead>
+          <tr><th>业务号码</th><th>客户</th><th>县分</th><th>网格</th><th>服务状态</th><th>业务类型</th><th>协议到期</th><th class="actions-col">操作</th></tr>
+        </thead>
+        <tbody>
+          {% for service in services %}
+            <tr>
+              <td class="mono">{{ service.service_number }}</td>
+              <td>{{ service.customer.name }}</td>
+              <td>{{ service.county_item.label if service.county_item else "-" }}</td>
+              <td>{{ service.grid_item.label if service.grid_item else "-" }}</td>
+              <td>
+                {% if service.service_status_item %}
+                  <span class="status-pill muted">{{ service.service_status_item.label }}</span>
+                {% else %}
+                  <span class="status-pill short_call">缺项</span>
+                {% endif %}
+              </td>
+              <td>{{ service.business_type_item.label if service.business_type_item else "-" }}</td>
+              <td>{{ service.agreement_expires_at|date or "-" }}</td>
+              <td class="actions">
+                <a class="button secondary small" href="/ledger?edit_id={{ service.id }}">编辑</a>
+                <form method="post" action="/ledger/{{ service.id }}/delete" data-confirm="作废该业务？所属设备需先处理。">
+                  <button class="button danger small" type="submit">作废</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8" class="empty">暂无业务记录。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+{% endblock %}

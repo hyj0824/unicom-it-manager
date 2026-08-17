@@ -1,63 +1,67 @@
 {% extends "base.html" %}
-{% block page_title %}Scripts{% endblock %}
+{% block page_title %}话术管理{% endblock %}
 {% block content %}
   <div class="grid form-list">
     <section class="panel">
       <div class="panel-head">
-        <h2>{{ "Edit script" if edit_script else "New script" }}</h2>
+        <h2>{{ "编辑话术" if edit_script else "新增话术" }}</h2>
       </div>
       {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
       <form class="stack" method="post" action="{{ '/scripts/' ~ edit_script.id ~ '/edit' if edit_script else '/scripts' }}">
         <label>
-          Title
+          标题
           <input name="title" value="{{ form_data.get('title', edit_script.title if edit_script else '') }}" required>
         </label>
         <label>
-          Script text
+          话术文本
           <textarea name="body" rows="8" required>{{ form_data.get('body', edit_script.body if edit_script else '') }}</textarea>
         </label>
         <label>
-          WAV path
+          本地 WAV 路径
           <input name="wav_path" value="{{ form_data.get('wav_path', edit_script.wav_path if edit_script else '') }}" placeholder="/home/radxa/audio/callback.wav">
         </label>
         <div class="button-row">
-          <button class="button primary" type="submit">{{ "Save changes" if edit_script else "Create script" }}</button>
-          {% if edit_script %}<a class="button ghost" href="/scripts">Cancel</a>{% endif %}
+          <button class="button primary" type="submit">{{ "保存修改" if edit_script else "创建话术" }}</button>
+          {% if edit_script %}<a class="button ghost" href="/scripts">取消</a>{% endif %}
         </div>
       </form>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Script list</h2>
+        <h2>话术列表</h2>
       </div>
       <table>
         <thead>
           <tr>
-            <th>Title</th>
-            <th>TTS</th>
+            <th>标题</th>
+            <th>音频状态</th>
             <th>WAV</th>
-            <th class="actions-col">Actions</th>
+            <th class="actions-col">操作</th>
           </tr>
         </thead>
         <tbody>
           {% for script in scripts %}
             <tr>
               <td>{{ script.title }}</td>
-              <td><span class="status-pill {{ script.tts_status }}">{{ script.tts_status }}</span></td>
+              <td>
+                <span class="status-pill {{ script.tts_status }}">
+                  {{ "已生成" if script.tts_status == "generated" else ("未生成" if script.tts_status == "not_generated" else "生成失败") }}
+                </span>
+              </td>
               <td class="mono">{{ script.wav_path or "-" }}</td>
               <td class="actions">
-                <a class="button secondary small" href="/scripts?edit_id={{ script.id }}">Edit</a>
+                <a class="button secondary small" href="/scripts?edit_id={{ script.id }}">编辑</a>
                 <form method="post" action="/scripts/{{ script.id }}/generate-audio">
-                  <button class="button secondary small" type="submit">Generate</button>
+                  <button class="button secondary small" type="submit">生成音频</button>
                 </form>
-                <form method="post" action="/scripts/{{ script.id }}/delete" data-confirm="Delete this script?">
-                  <button class="button danger small" type="submit">Delete</button>
+                <form method="post" action="/scripts/{{ script.id }}/delete" data-confirm="删除该话术？">
+                  <button class="button danger small" type="submit">删除</button>
                 </form>
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="4" class="empty">No scripts yet.</td></tr>
+            <tr><td colspan="4" class="empty">暂无话术。</td></tr>
           {% endfor %}
         </tbody>
       </table>

@@ -1,79 +1,104 @@
 {% extends "base.html" %}
-{% block page_title %}Dashboard{% endblock %}
+{% block page_title %}工作台{% endblock %}
 {% block content %}
   <div class="metrics">
     <div class="metric">
-      <span>Due today</span>
+      <span>待审核变更</span>
+      <strong>{{ pending_reviews }}</strong>
+    </div>
+    <div class="metric">
+      <span>缺项条目</span>
+      <strong>{{ missing_total }}</strong>
+    </div>
+    <div class="metric">
+      <span>今日待拨计划</span>
       <strong>{{ due_today }}</strong>
     </div>
     <div class="metric">
-      <span>Active queue</span>
-      <strong>{{ "Yes" if active_task else "No" }}</strong>
-    </div>
-    <div class="metric">
-      <span>Completed</span>
-      <strong>{{ stats.completed }}</strong>
-    </div>
-    <div class="metric">
-      <span>Failed</span>
-      <strong>{{ stats.failed }}</strong>
+      <span>30 天内到期业务</span>
+      <strong>{{ expiring_services }}</strong>
     </div>
   </div>
 
-  <div class="grid two">
-    <section class="panel">
-      <div class="panel-head">
-        <h2>System totals</h2>
+  <section class="panel">
+    <div class="panel-head"><h2>当前拨号状态</h2></div>
+    <div class="summary-grid">
+      <div>
+        <span>当前任务</span>
+        <strong>
+          {% if active_task %}
+            <span class="status-pill {{ active_task.status }}">{{ active_task.status }}</span>
+            {{ active_task.dial_number or "无号码" }}
+          {% else %}
+            空闲
+          {% endif %}
+        </strong>
       </div>
-      <div class="summary-grid">
-        <div><span>Customers</span><strong>{{ counts.customers }}</strong></div>
-        <div><span>Scripts</span><strong>{{ counts.scripts }}</strong></div>
-        <div><span>Plans</span><strong>{{ counts.plans }}</strong></div>
-        <div><span>Records</span><strong>{{ counts.records }}</strong></div>
+      <div>
+        <span>通话统计</span>
+        <strong>
+          完成 {{ call_stats.completed }} · 短通话 {{ call_stats.short_call }} ·
+          未接通 {{ call_stats.no_answer }} · 失败 {{ call_stats.failed }}
+        </strong>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Call outcomes</h2>
-      </div>
-      <div class="summary-grid">
-        <div><span>Short calls</span><strong>{{ stats.short_call }}</strong></div>
-        <div><span>No answer</span><strong>{{ stats.no_answer }}</strong></div>
-        <div><span>Queued</span><strong>{{ stats.queued }}</strong></div>
-        <div><span>Scheduler</span><strong>{{ "On" if scheduler_enabled else "Off" }}</strong></div>
-      </div>
-    </section>
+  <div class="metrics">
+    <div class="metric"><span>有效业务</span><strong>{{ counts.services }}</strong></div>
+    <div class="metric"><span>有效设备</span><strong>{{ counts.devices }}</strong></div>
+    <div class="metric"><span>客户</span><strong>{{ counts.customers }}</strong></div>
+    <div class="metric"><span>回访计划</span><strong>{{ counts.plans }}</strong></div>
   </div>
 
   <section class="panel">
     <div class="panel-head">
-      <h2>Recent call records</h2>
-      <a class="button secondary" href="/calls">View all</a>
+      <h2>最近通话</h2>
+      <a class="button secondary small" href="/calls">全部通话</a>
     </div>
     <table>
       <thead>
-        <tr>
-          <th>Time</th>
-          <th>Customer</th>
-          <th>Script</th>
-          <th>Status</th>
-          <th>Duration</th>
-        </tr>
+        <tr><th>时间</th><th>客户</th><th>号码</th><th>话术</th><th>状态</th><th>时长</th></tr>
       </thead>
       <tbody>
         {% for record in recent_records %}
           <tr>
             <td>{{ record.created_at|dt }}</td>
             <td>{{ record.customer.name }}</td>
+            <td class="mono">{{ record.dial_number or "-" }}</td>
             <td>{{ record.script.title }}</td>
             <td><span class="status-pill {{ record.status }}">{{ record.status }}</span></td>
             <td>{{ record.duration_seconds or "-" }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="5" class="empty">No call records yet.</td></tr>
+          <tr><td colspan="6" class="empty">暂无通话记录。</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </section>
+
+  {% if recent_batches %}
+    <section class="panel">
+      <div class="panel-head">
+        <h2>最近异常导入批次</h2>
+        <a class="button secondary small" href="/imports">导入导出</a>
+      </div>
+      <table>
+        <thead>
+          <tr><th>文件</th><th>导入时间</th><th>总行数</th><th>错误</th><th>缺项</th></tr>
+        </thead>
+        <tbody>
+          {% for batch in recent_batches %}
+            <tr>
+              <td>{{ batch.file_name }}</td>
+              <td>{{ batch.created_at|dt }}</td>
+              <td>{{ batch.total_rows }}</td>
+              <td><span class="status-pill error">{{ batch.error_count }}</span></td>
+              <td><span class="status-pill short_call">{{ batch.missing_count }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
 {% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block page_title %}角色权限{% endblock %}
+{% block content %}
+  <section class="panel">
+    <div class="panel-head"><h2>岗位角色与默认权限</h2></div>
+    <table>
+      <thead>
+        <tr><th>角色</th><th>说明</th><th>默认数据域</th><th>权限</th></tr>
+      </thead>
+      <tbody>
+        {% for role in roles %}
+          {% set own = permissions|selectattr("role_id", "equalto", role.id)|list %}
+          <tr>
+            <td>{{ role.name }}{% if role.is_preset %} <span class="status-pill muted">预置</span>{% endif %}</td>
+            <td>{{ role.description or "-" }}</td>
+            <td>{{ own|map(attribute="domain")|unique|join("、") or "-" }}</td>
+            <td>
+              {% for entry in own %}
+                <span class="status-pill muted">{{ permission_map[entry.permission_id].description }}（{{ entry.domain }}）</span>
+              {% else %}
+                <span class="subtle">未绑定权限</span>
+              {% endfor %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}
