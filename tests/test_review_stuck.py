@@ -3,8 +3,7 @@ from __future__ import annotations
 """审核卡单提醒扫描（app/services/scans.py run_review_stuck_scan）单元测试。
 
 覆盖：
-- 阈值判定：阈值内（含边界）不通知、超阈值通知；
-- app_settings review_stuck_hours 自定义阈值生效；
+- 全部 submitted 变更申请都提醒（不做卡单时长阈值）；
 - 通知对象：只有启用且绑定角色拥有 review 权限、且有手机的用户被通知；
 - 同一卡单对多个审核人员各生成一条任务；
 - 同一天同一 change_set 去重（幂等）；
@@ -26,7 +25,6 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    AppSetting,
     BusinessService,
     CallTask,
     ChangeItem,
@@ -175,26 +173,14 @@ def _reviewer(
     return user
 
 
-# ---------------------------------------------------------------- 阈值判定
+# ---------------------------------------------------------------- 全部待审核都提醒
 
 
-def test_review_stuck_within_threshold_not_notified(db: Session) -> None:
+def test_review_stuck_notifies_all_submitted(db: Session) -> None:
     customer = make_customer(db)
     service = make_business(db, customer, "3001")
     _reviewer(db)
-    # 恰好 24 小时（阈值边界，submitted_at >= 阈值时刻 → 未卡单）与 23 小时都不通知。
-    make_change_set(db, submitted_at=NOW - timedelta(hours=24), service=service)
-    make_change_set(db, submitted_at=NOW - timedelta(hours=23), service=service)
-    schedule = make_schedule(db)
-
-    assert run_review_stuck_scan(db, schedule, now=NOW) == 0
-    assert task_count(db) == 0
-
-
-def test_review_stuck_over_threshold_notifies(db: Session) -> None:
-    customer = make_customer(db)
-    service = make_business(db, customer, "3001")
-    _reviewer(db)
+    # 不管提交多久，只要还是 submitted 就提醒（不做卡单时长阈值）。
     change_set = make_change_set(
         db, title="修改协议到期时间", submitted_at=NOW - timedelta(hours=25), service=service
     )
@@ -223,23 +209,19 @@ def test_review_stuck_over_threshold_notifies(db: Session) -> None:
     meta = json.loads(task.meta_json)
     assert meta["change_set_id"] == change_set.id
     assert meta["rendered_script"] == body
-    assert meta["review_stuck_hours"] == 24
+    assert "review_stuck_hours" not in meta
 
 
-def test_review_stuck_hours_setting_overrides_threshold(db: Session) -> None:
+def test_review_stuck_notifies_even_recently_submitted(db: Session) -> None:
     customer = make_customer(db)
     service = make_business(db, customer, "3001")
     _reviewer(db)
-    # 默认 24 小时不会通知 2 小时前的提交；配置为 1 小时后通知。
+    # 2 小时前提交同样提醒：cron 扫出全部待审核，无阈值。
     make_change_set(db, submitted_at=NOW - timedelta(hours=2), service=service)
     schedule = make_schedule(db)
-    assert run_review_stuck_scan(db, schedule, now=NOW) == 0
 
-    db.add(AppSetting(key="review_stuck_hours", value="1"))
-    db.flush()
     assert run_review_stuck_scan(db, schedule, now=NOW) == 1
-    meta = json.loads(first_task(db).meta_json)
-    assert meta["review_stuck_hours"] == 1
+    assert task_count(db) == 1
 
 
 # ---------------------------------------------------------------- 通知对象
@@ -329,22 +311,25 @@ def test_review_stuck_skips_change_set_without_business(db: Session) -> None:
             patch_json="{}",
         )
     )
-    # 非 submitted 状态（draft / approved）即使超阈值也不通知。
+    # 非 submitted 状态（draft / approved）不提醒。
     make_change_set(
         db, title="草稿单", status="draft", submitted_at=NOW - timedelta(hours=25), service=service
     )
     make_change_set(
         db, title="已审核单", status="approved", submitted_at=NOW - timedelta(hours=25), service=service
     )
-    # submitted 但没有提交时间 → 跳过。
-    make_change_set(db, title="无提交时间", service=service)
+    # submitted 但没有提交时间：状态仍是 submitted，同样提醒（判定只看状态）。
+    no_submitted_at = make_change_set(db, title="无提交时间", service=service)
     # 关联真实业务的卡单 → 正常通知。
     stuck = make_change_set(db, submitted_at=NOW - timedelta(hours=25), service=service)
     schedule = make_schedule(db)
 
-    assert run_review_stuck_scan(db, schedule, now=NOW) == 1
-    assert task_count(db) == 1
-    assert json.loads(first_task(db).meta_json)["change_set_id"] == stuck.id
+    assert run_review_stuck_scan(db, schedule, now=NOW) == 2
+    assert task_count(db) == 2
+    change_set_ids = {
+        json.loads(t.meta_json)["change_set_id"] for t in db.scalars(select(CallTask)).all()
+    }
+    assert change_set_ids == {no_submitted_at.id, stuck.id}
 
 
 # ---------------------------------------------------------------- 统一入口

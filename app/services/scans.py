@@ -7,7 +7,7 @@ from __future__ import annotations
 
 - `due_renewal`（协议到期维系）：协议到期前 N 天（lead_days）提醒客户经理续签；
 - `device_recycle`（退网设备回收）：退网业务下未回收的设备，提醒网络维护责任人回收；
-- `review_stuck`（审核卡单提醒）：submitted 超过阈值未审核的变更申请，提醒审核人员处理。
+- `review_stuck`（审核卡单提醒）：全部 submitted 待审核的变更申请，提醒审核人员处理。
 
 调度器只负责到点调用 `run_scan_for_schedule`；本模块负责查询、话术渲染、
 去重与任务入队，事务提交由调用方负责。扫描过程不访问串口/声卡，与真实
@@ -42,7 +42,6 @@ from ..models import (
     utcnow,
 )
 from . import scripts as script_service
-from .settings import get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +82,6 @@ DUTY_NETWORK_MAINTENANCE = "网络维护责任人"
 SOURCE_DUE_RENEWAL = "due_renewal"
 SOURCE_DEVICE_RECYCLE = "device_recycle"
 SOURCE_REVIEW_STUCK = "review_stuck"
-
-# 审核卡单阈值（小时）的 app_settings 键；缺失或非法时用默认 24 小时。
-REVIEW_STUCK_HOURS_KEY = "review_stuck_hours"
-DEFAULT_REVIEW_STUCK_HOURS = 24
 
 
 # ---------------------------------------------------------------------------
@@ -493,25 +488,6 @@ def run_device_recycle_scan(
 # ---------------------------------------------------------------------------
 
 
-def _review_stuck_hours(db: Session) -> int:
-    """审核卡单阈值（小时）：从 app_settings 读取，缺失或非法时回退默认值。"""
-
-    raw = get_setting(db, REVIEW_STUCK_HOURS_KEY, str(DEFAULT_REVIEW_STUCK_HOURS))
-    try:
-        hours = int(raw)
-    except (TypeError, ValueError):
-        hours = 0
-    if hours < 1:
-        logger.warning(
-            "app_settings %s 非法：%r，使用默认 %d",
-            REVIEW_STUCK_HOURS_KEY,
-            raw,
-            DEFAULT_REVIEW_STUCK_HOURS,
-        )
-        return DEFAULT_REVIEW_STUCK_HOURS
-    return hours
-
-
 def _reviewer_users(db: Session) -> list[User]:
     """审核人员：is_enabled 且绑定角色（user_roles→roles→role_permissions→
     permissions）拥有 code='review' 权限的用户，按 id 升序。
@@ -555,12 +531,12 @@ def _change_set_business(db: Session, change_set: ChangeSet) -> BusinessService 
 def run_review_stuck_scan(
     db: Session, schedule: ScanSchedule, now: datetime | None = None
 ) -> int:
-    """扫描审核卡单：status=submitted 且 submitted_at 早于「当前-卡单阈值」的
-    变更申请，逐卡单逐审核人员生成一条通知任务，返回任务数。
+    """扫描审核卡单：把全部 status=submitted 的变更申请扫出来提醒审核人员。
 
-    阈值小时数从 app_settings「review_stuck_hours」读取（默认 24）；通知对象
-    为绑定角色拥有 review 权限的启用用户（user.phone 为空跳过）；同一天同一
-    change_set 不重复通知（meta_json change_set_id 去重）。
+    不做“卡单时长阈值”配置：cron 到点即提醒全部待审核申请，同一天同一
+    change_set 不重复通知（meta_json change_set_id 去重），审核通过/驳回
+    后状态不再是 submitted，自然不再提醒。通知对象为绑定角色拥有 review
+    权限的启用用户（user.phone 为空跳过）。
     """
 
     now_utc = _as_utc(now) if now is not None else utcnow()
@@ -568,8 +544,6 @@ def run_review_stuck_scan(
     day_start_utc = _local_date_utc(now_utc, schedule.timezone)
     scan_date = now_utc.astimezone(zone).strftime("%Y-%m-%d")
 
-    hours = _review_stuck_hours(db)
-    threshold_at = now_utc - timedelta(hours=hours)
     template = _template_for(schedule)
     existing = _existing_target_ids(db, SOURCE_REVIEW_STUCK, day_start_utc, "change_set_id")
     reviewers = [u for u in _reviewer_users(db) if (u.phone or "").strip()]
@@ -590,11 +564,6 @@ def run_review_stuck_scan(
 
     created = 0
     for change_set in change_sets:
-        # submitted_at 可能为 naive UTC（与台账导入一致），统一转 UTC 比较。
-        if change_set.submitted_at is None:
-            continue
-        if _as_utc(change_set.submitted_at) >= threshold_at:
-            continue
         if change_set.id in existing:
             logger.info(
                 "扫描 #%s：变更申请 %s 当天已有卡单提醒任务，跳过",
@@ -637,7 +606,6 @@ def run_review_stuck_scan(
                         {
                             "change_set_id": change_set.id,
                             "rendered_script": body,
-                            "review_stuck_hours": hours,
                         },
                         ensure_ascii=False,
                     ),
