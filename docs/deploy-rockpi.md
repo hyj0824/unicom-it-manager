@@ -28,9 +28,14 @@ Call Worker 线程都在这一个进程内启动（`app/main.py` 的 lifespan）
 # 系统信息核对（示例输出）
 uname -m                 # aarch64
 python3 --version        # 3.11.x（项目要求 >=3.11，Rock Pi 3A Debian 实测 3.11.2）
-ffplay --version         # 播放必选依赖，由 ffmpeg 包提供（缺失时：sudo apt install ffmpeg）
-aplay -l                 # 声卡诊断可选（alsa-utils），用于核对 AUDIO_DEVICE
+aplay -l                 # 声卡诊断（alsa-utils），用于核对 AUDIO_DEVICE
 git --version
+```
+
+> 播放依赖系统 `ffmpeg`（`-f alsa` 输出，各版本标配）：
+
+```bash
+ffmpeg --version   # 缺失时：sudo apt install ffmpeg
 ```
 
 安装 `uv`（本项目统一用 `uv` 管理 Python 环境和依赖，不使用系统 Python 直接
@@ -116,28 +121,21 @@ cat /proc/asound/cards
 card 1: rk809 [rockchip-rk809], device 0: rk809-hifi rk809-hifi-0
 ```
 
-确认设备后用 `ffplay` 试播一个音频文件（支持 WAV/MP3 等 ffmpeg 可解码格式）：
+确认设备后用 ffmpeg 试播一个音频文件（支持 WAV/MP3 等 ffmpeg 可解码格式）：
 
 ```bash
-ffplay -nodisp -autoexit -loglevel quiet -audio_device plughw:1,0 /path/to/test.wav
+ffmpeg -hide_banner -loglevel error -i /path/to/test.wav -f alsa plughw:1,0
 ```
 
 - `plughw:1,0` 中 `1` 是 `aplay -l` 显示的 card 编号，`0` 是 device 编号；
-  编号因启动顺序可能变化，务必以 `aplay -l` 实机输出为准。
-- `-audio_device` 需要 ffmpeg ≥ 6.0（`ffplay -h | grep audio_device` 可确认）；
-  Debian bookworm 默认 ffmpeg 5.1 **不支持**该参数，应用会自动回退到系统
-  默认 ALSA 设备。若默认设备不是 3.5mm 声卡（以 `aplay -l` 为准，如 rk809
-  是 card 1），二选一：
-  - 升级 ffmpeg（如安装新版静态构建或 backports）；
-  - 把默认 ALSA 设备指到 3.5mm 声卡（推荐，改完重启服务）：
-
-    ```bash
-    # ~/.asoundrc（注意 card 编号以 aplay -l 实机输出为准）
-    cat > ~/.asoundrc <<'EOF'
-    pcm.!default { type hw; card 1; device 0; }
-    ctl.!default { type hw; card 1; }
-    EOF
-    ```
+  编号因启动顺序可能变化，务必以 `aplay -l` 实机输出为准。播放链路
+  （Call Worker、smoke test）会把 `AUDIO_DEVICE` 原样传给 `-f alsa` 后的
+  设备参数。
+- 如果试播无声，检查音量：`alsamixer -c 1`（或
+  `amixer -c 1 set Master 80%`），确认 rk809 的 Playback 通道未静音、音量
+  足够；后续还要验收 3.5mm → A7670E 的上行音频链路（对端能否听到），见
+  `docs/callback-demo-plan.md`「硬件与运行环境」。
+- 试播确认后把 `AUDIO_DEVICE` 配置为同一值（如 `plughw:1,0`），见第 5 节。
 - 如果试播无声，检查音量：`alsamixer -c 1`（或
   `amixer -c 1 set Master 80%`），确认 rk809 的 Playback 通道未静音、音量
   足够；后续还要验收 3.5mm → A7670E 的上行音频链路（对端能否听到），见
@@ -277,7 +275,7 @@ sudo systemctl restart callback-demo-web
    ```
 
    期望事件（`docs/callback-demo-plan.md` 有完整日志样例）：`VOICE CALL:
-   BEGIN` → `ffplay` exit=0 → `VOICE CALL: END` → `NO CARRIER`，串口干净释放。
+   BEGIN` → ffmpeg exit=0 → `VOICE CALL: END` → `NO CARRIER`，串口干净释放。
    **先决条件**：如果 Web 服务的 Worker 已开启，先到管理页关闭 Worker 运行时
    开关（或 `sudo systemctl stop callback-demo-web`），避免与 smoke test 抢
    串口。
@@ -319,7 +317,7 @@ sudo systemctl restart callback-demo-web
 | 启动报 `Database schema is not up to date` | 未执行迁移或代码已更新；`uv run alembic upgrade head` 后重启。 |
 | 串口 `Permission denied` | 用户不在 `dialout` 组（重新登录生效），或 udev 规则未生效；见第 2 节。 |
 | 串口节点不存在（`/dev/ttyUSB*` 为空） | 检查 USB 接线与 `dmesg | grep ttyUSB`；`MODEM_PORT` 与实际枚举不符时改 `.env`。 |
-| `ffplay` 无声音、报设备错误或找不到 | `ffplay --version` 确认 ffmpeg 已安装；`aplay -l` 核对 `AUDIO_DEVICE` 编号；ffmpeg < 6.0 不支持 `-audio_device` 时应用自动回退默认设备，建议升级 ffmpeg 或配置默认声卡；`alsamixer -c <card>` 检查音量/静音；见第 3 节。 |
+| 播放无声音、报设备错误或找不到 ffmpeg | `aplay -l` 核对 `AUDIO_DEVICE` 编号；`ffmpeg --version` 确认已安装（缺失时 `sudo apt install ffmpeg`）；`alsamixer -c <card>` 检查音量/静音；见第 3 节。 |
 | 写 `data/` 报 PermissionError | 仓库目录属主与 systemd 的 `User=` 不一致；`sudo chown -R radxa:radxa /home/radxa/callback-demo`（路径示例）。 |
 | 任务一直 `queued` 不拨号 | Worker 两层开关未同时打开：`.env` 的 `CALL_WORKER_ENABLED` + 管理页运行时开关；见第 7 节。 |
 | 管理页显示 Worker「配置未开启」 | 硬开关为 `0`，属预期；确认硬件后再开启。 |

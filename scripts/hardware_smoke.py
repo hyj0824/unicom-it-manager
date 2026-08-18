@@ -16,7 +16,7 @@ from app.modem.parser import parse_modem_line  # noqa: E402
 
 
 def play_audio(audio_path: str, audio_device: str) -> int:
-    """用 ffplay 播放音频（复用 app.audio 的探测与命令构造）；返回退出码。"""
+    """用系统 ffmpeg 播放音频（复用 app.audio.play_audio）；返回退出码。"""
     from app.audio import play_audio as _play
 
     return _play(audio_path, audio_device).returncode
@@ -66,7 +66,7 @@ def main() -> int:
 
         print(f"Playing {wav_path} on {args.audio_device}")
         play_result = play_audio(str(wav_path), args.audio_device)
-        print(f"ffplay exit code: {play_result}")
+        print(f"ffmpeg exit code: {play_result}")
 
         if args.hangup_after_play:
             print("> AT+CHUP")

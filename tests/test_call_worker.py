@@ -41,7 +41,7 @@ def db(tmp_path: Path):
 
 @pytest.fixture()
 def fake_modem(monkeypatch):
-    """替换串口与 ffplay：worker 只与内存中的假串口交互，不真实播放。"""
+    """替换串口与系统 ffmpeg：worker 只与内存中的假串口交互，不真实播放。"""
 
     from app.services import call_worker as worker_module
 

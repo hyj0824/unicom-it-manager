@@ -12,7 +12,7 @@ from __future__ import annotations
 - 话术页：失败状态展示、重生成入口结果反馈、试听按钮仅对 data/audio 内
   的 WAV 渲染。
 
-不接触真实串口与 ffplay；TestClient 不用上下文管理器，避免启动
+不接触真实串口与系统 ffmpeg；TestClient 不用上下文管理器，避免启动
 Scheduler / Call Worker 线程。音频写入通过 monkeypatch 重定向到临时目录。
 """
 

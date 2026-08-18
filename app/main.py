@@ -1718,7 +1718,7 @@ SYSTEM_TABS = {"status", "logs", "settings"}
 ENV_SETTINGS = [
     ("MODEM_PORT", lambda s: s.modem_port, "A7670E 串口设备路径"),
     ("MODEM_BAUD", lambda s: s.modem_baud, "串口波特率"),
-    ("AUDIO_DEVICE", lambda s: s.audio_device, "ffplay 播放设备（ALSA）"),
+    ("AUDIO_DEVICE", lambda s: s.audio_device, "ffmpeg 播放设备（ALSA）"),
     ("CALL_CONNECT_TIMEOUT_SECONDS", lambda s: s.call_connect_timeout_seconds, "接通等待超时兜底（秒）"),
     ("MIN_CONNECTED_SECONDS", lambda s: s.min_connected_seconds, "接通后有效时长阈值（秒）"),
     ("RETRY_DELAY_SECONDS", lambda s: s.retry_delay_seconds, "自动重试延迟（秒）"),

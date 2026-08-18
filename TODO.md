@@ -63,7 +63,7 @@
 - [x] 准备格式兼容、音量合适的测试 WAV（8kHz/16bit/mono 识别性提示音，5.4s，
   使用操作者明确授权的测试号码完成实机验证）。
 - [x] 人工运行 `uv run python scripts/hardware_smoke.py <测试号码> <wav>`：
-  观察到 `VOICE CALL: BEGIN`，aplay exit=0，`VOICE CALL: END: 000005`，
+  观察到 `VOICE CALL: BEGIN`，播放 exit=0（当时用 aplay，现改用系统 ffmpeg），`VOICE CALL: END: 000005`，
   全程干净释放。
 - [x] 应用级端到端：开启 `CALL_WORKER_ENABLED=1` + 管理页 Worker 开关，真实
   CallWorker 经 DB 拨号→接通→播放→挂断，15 条 CallEvent 完整落库，任务
@@ -141,9 +141,8 @@
 
 - [x] 接入真实 TTS Provider：`TTS_PROVIDER=edge`（Microsoft Edge 在线 TTS，
   免费、无需 API key、需联网，输出 24kHz mono MP3）；`TTS_PROVIDER=none`
-  保留为离线默认值；播放端统一改用 `ffplay`（ffmpeg 套件，必选依赖，
-  支持 WAV/MP3 直接解码，`-audio_device` 需 ffmpeg ≥ 6.0，旧版回退默认
-  设备）。
+  保留为离线默认值；播放端用系统 ffmpeg 直接输出到 `AUDIO_DEVICE` 指定的
+  ALSA 设备（`-f alsa`，各版本标配）。
 - [x] 规范生成 WAV 的目录、命名、采样率、声道和缓存/覆盖策略（`data/audio/`，
   `script-{id}-{正文sha1前12位}.wav`，8kHz/16bit/mono，原子写覆盖，见
   app/audio.py 与 README「话术音频」）。

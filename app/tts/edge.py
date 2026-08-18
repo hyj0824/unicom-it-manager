@@ -3,7 +3,7 @@ from __future__ import annotations
 """Microsoft Edge 在线 TTS Provider。
 
 免费、无需 API key，但需要能访问微软 Edge TTS 服务的网络（内网离线环境
-不可用时会失败并写入 `tts_error`）。输出 24kHz mono MP3，播放端用 ffplay
+不可用时会失败并写入 `tts_error`）。输出 24kHz mono MP3，
 直接播放，不做转码（格式约定放宽，见 app/audio.py 与 README「话术音频」）。
 
 配置：`TTS_PROVIDER=edge`，可选 `TTS_VOICE`（默认 `zh-CN-XiaoxiaoNeural`）。

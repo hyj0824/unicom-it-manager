@@ -67,7 +67,7 @@ def script_audio_url(script: Script) -> str:
     """话术音频位于 data/audio/ 下时返回试听 URL（/audio/<文件名>），否则空串。
 
     手动指定的外部路径（如 smoke test 用 WAV）不提供 Web 试听，仍可被
-    ffplay 播放，避免 Web 路由暴露 data/audio 之外的任意文件。
+    系统 ffmpeg 播放，避免 Web 路由暴露 data/audio 之外的任意文件。
     """
     if not script.wav_path:
         return ""

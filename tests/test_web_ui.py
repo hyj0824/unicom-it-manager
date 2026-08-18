@@ -12,7 +12,7 @@ from __future__ import annotations
 - 高影响操作的 data-confirm 确认提示；
 - 删除被引用客户 / 话术时的可读错误（含引用数量）。
 
-不接触真实串口与 ffplay；TestClient 不用上下文管理器，避免启动
+不接触真实串口与系统 ffmpeg；TestClient 不用上下文管理器，避免启动
 Scheduler / Call Worker 线程。
 """
 

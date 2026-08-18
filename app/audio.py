@@ -9,11 +9,12 @@ from __future__ import annotations
 - 命名：`script-{话术id}-{正文sha1前12位}{扩展名}`。正文变化会得到新文件名，
   同一正文重复生成命中同名文件（即缓存）；重新生成采用原子覆盖，不会出现
   半截文件。
-- 格式：由 TTS Provider 决定（`output_suffix`，如 `.wav` 或 `.mp3`），
-  不做强制转换；`TTS_PROVIDER=none` 的测试音仍为 8kHz/16bit/mono WAV。
-- 播放：统一使用 `ffplay`（ffmpeg 套件，必选依赖），支持所有 ffplay 可解
-  码的格式；`AUDIO_DEVICE` 在 ffplay 支持 `-audio_device`（ffmpeg ≥ 6.0）
-  时生效，旧版本回退到系统默认 ALSA 设备。
+- 格式：由 TTS Provider 决定（`output_suffix`，如 `.wav` 或 `.mp3`），不做
+  强制转换；`TTS_PROVIDER=none` 的测试音仍为 8kHz/16bit/mono WAV。
+- 播放：调用系统 `ffmpeg`（Debian bookworm 自带 5.1，`apt install ffmpeg`）
+  直接输出到 ALSA 设备（`-f alsa <设备>`），支持 WAV/MP3 等 ffmpeg 可解码
+  格式，播放结束自动退出；`AUDIO_DEVICE` 直接生效，不依赖特定 ffmpeg 版本
+  （`-f alsa` 输出为各版本标配）。
 - 覆盖策略：`write_wav_atomic` 先写同目录临时文件并 fsync，再 `os.replace`
   原子替换；异常时清理临时文件。
 
@@ -22,10 +23,10 @@ Web 试听只允许读取本目录下的 WAV/MP3（`resolve_audio_file`），防
 
 import hashlib
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
 from .config import BASE_DIR
@@ -44,39 +45,30 @@ class PlaybackResult:
     message: str = ""
 
 
-@lru_cache(maxsize=1)
-def _ffplay_supports_audio_device() -> bool:
-    """探测本机 ffplay 是否支持 `-audio_device`（ffmpeg ≥ 6.0 新增）。"""
-    try:
-        completed = subprocess.run(
-            ["ffplay", "-hide_banner", "-h"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-        return "-audio_device" in (completed.stdout + completed.stderr)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
 def play_audio(audio_path: str, audio_device: str) -> PlaybackResult:
-    """用 ffplay 播放音频文件；`-nodisp -autoexit` 无窗口、播完即退。"""
+    """用系统 ffmpeg 把音频解码输出到 ALSA 设备；播完自动退出。"""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return PlaybackResult(
+            False, 127, "ffmpeg not found; install it with: sudo apt install ffmpeg"
+        )
+
     path = Path(audio_path)
     if not path.exists():
         return PlaybackResult(False, 1, f"Audio file does not exist: {audio_path}")
 
-    cmd = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"]
-    if audio_device and _ffplay_supports_audio_device():
-        cmd.extend(["-audio_device", audio_device])
-    cmd.append(str(path))
-
-    try:
-        completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    except FileNotFoundError:
-        return PlaybackResult(
-            False, 127, "ffplay not found; install ffmpeg to provide the ffplay player."
-        )
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(path),
+        "-f",
+        "alsa",
+        audio_device or "default",
+    ]
+    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     message = completed.stderr.strip() or completed.stdout.strip()
     return PlaybackResult(completed.returncode == 0, completed.returncode, message)
 

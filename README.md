@@ -64,7 +64,8 @@ uv run python scripts/hardware_smoke.py YOUR_TEST_PHONE /path/to/audio.wav
 ```
 
 The script dials through the configured A7670E serial port, waits for
-`VOICE CALL: BEGIN`, plays the audio file with `ffplay`, and prints the serial log.
+`VOICE CALL: BEGIN`, plays the audio file with the system `ffmpeg`
+(`-f alsa` output), and prints the serial log.
 
 ## 话术音频
 
@@ -76,7 +77,9 @@ The script dials through the configured A7670E serial port, waits for
   同名文件（缓存），不重复调用 TTS；正文变化生成新文件，旧文件保留为历史
   缓存。扩展名由 Provider 决定（`.wav` / `.mp3`）。
 - 格式：不做强制转码，由 TTS Provider 决定；`TTS_PROVIDER=none` 的测试音仍为
-  8kHz/16bit/mono WAV。播放统一使用 `ffplay`（ffmpeg 套件，**必选依赖**）。
+  8kHz/16bit/mono WAV。播放调用系统 `ffmpeg`（`apt install ffmpeg`，Debian
+  bookworm 自带 5.1）直接输出到 ALSA 设备（`-f alsa <AUDIO_DEVICE>`），
+  支持 WAV/MP3 等格式，`-f alsa` 输出为各版本标配，设备参数直接生效。
 - 覆盖策略：原子写（同目录临时文件 + `os.replace`），不会出现半截文件。
 - 状态：`tts_status` 为 `not_generated` / `generated` / `failed`，失败原因
   写入 `tts_error`；话术页提供「生成音频」重试入口（结果以页面提示反馈）和
