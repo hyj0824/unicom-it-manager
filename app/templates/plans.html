@@ -7,6 +7,7 @@
         <h2>{{ "编辑计划" if edit_plan else "新增计划" }}</h2>
       </div>
       {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+      {% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
       {% set selected_customer = form_data.get('customer_id', edit_plan.customer_id if edit_plan else '') %}
       {% set selected_script = form_data.get('script_id', edit_plan.script_id if edit_plan else '') %}
       {% set selected_trigger = form_data.get('trigger_type', edit_plan.trigger_type if edit_plan else 'once') %}
@@ -55,6 +56,7 @@
         <label>
           Cron 表达式
           <input name="cron_expr" value="{{ form_data.get('cron_expr', edit_plan.cron_expr if edit_plan else '') }}" placeholder="0 9 * * *">
+          <span class="subtle">示例：0 9 * * * 每天 09:00 · 0 9 * * 1-5 工作日 09:00 · */30 * * * * 每 30 分钟</span>
         </label>
         <label>
           时区
@@ -69,6 +71,19 @@
           {% if edit_plan %}<a class="button ghost" href="/plans">取消</a>{% endif %}
         </div>
       </form>
+      {% if next_run_preview %}
+        <div class="alert success">校验通过：下次执行时间 {{ next_run_preview|dt(selected_timezone) }}（{{ selected_timezone }}）。</div>
+      {% elif edit_plan and edit_plan.next_run_at %}
+        <div class="alert">当前计划下次执行：{{ edit_plan.next_run_at|dt(selected_timezone) }}（{{ edit_plan.timezone }}）。保存后以重新计算为准。</div>
+      {% endif %}
+      {% if edit_plan %}
+        <div class="panel-foot">
+          <form method="post" action="/plans/{{ edit_plan.id }}/call-now"
+                data-confirm="立即按当前计划拨打一次（{{ edit_plan.customer.name }} → {{ edit_plan.contact.name if edit_plan.contact else '默认负责人' }}）？不会修改本计划。">
+            <button class="button primary" type="submit">立即拨打一次</button>
+          </form>
+        </div>
+      {% endif %}
     </section>
 
     <section class="panel">

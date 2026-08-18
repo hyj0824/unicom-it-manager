@@ -40,6 +40,13 @@
               <td>{{ customer.created_at|dt }}</td>
               <td class="actions">
                 <a class="button secondary small" href="/customers?edit_id={{ customer.id }}">编辑</a>
+                <form method="post" action="/customers/{{ customer.id }}/call-now"
+                      data-confirm="立即为该客户生成一次外呼任务并加入队列？不会修改任何计划。">
+                  <select name="script_id" class="select-inline" title="选择话术">
+                    {% for script in scripts %}<option value="{{ script.id }}">{{ script.title }}</option>{% endfor %}
+                  </select>
+                  <button class="button primary small" type="submit">立即拨打</button>
+                </form>
                 <form method="post" action="/customers/{{ customer.id }}/delete" data-confirm="删除该客户？">
                   <button class="button danger small" type="submit">删除</button>
                 </form>
@@ -118,5 +125,36 @@
         </form>
       </section>
     </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>立即拨打一次</h2>
+        <span class="subtle">生成独立的一次性任务，不修改任何计划</span>
+      </div>
+      {% if call_error %}<div class="alert error">{{ call_error }}</div>{% endif %}
+      <form class="stack" method="post" action="/customers/{{ edit_customer.id }}/call-now"
+            data-confirm="立即为该客户生成一次外呼任务并加入队列？不会修改任何计划。">
+        <div class="grid two">
+          <label>
+            话术
+            <select name="script_id" required>
+              {% for script in scripts %}<option value="{{ script.id }}">{{ script.title }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>
+            拨打负责人（默认：默认拨打负责人）
+            <select name="contact_id">
+              <option value="">默认负责人</option>
+              {% for link in contacts %}
+                <option value="{{ link.contact.id }}">{{ link.contact.name or "未命名" }} · {{ link.contact.phone or "无电话" }}{% if link.duty %} · {{ link.duty }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <div class="button-row">
+          <button class="button primary" type="submit">立即拨打</button>
+        </div>
+      </form>
+    </section>
   {% endif %}
 {% endblock %}
