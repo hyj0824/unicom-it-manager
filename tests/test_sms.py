@@ -54,6 +54,7 @@ from app.models import (
 )
 from app.services import scans
 from app.services.call_worker import CallWorker, CallWorkerService
+from app.services import sms
 from app.services.sms import SmsError, encode_ucs2_hex, is_ascii, send_sms_text
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -322,7 +323,11 @@ def test_send_sms_text_sim_not_ready_raises() -> None:
         send_sms_text(modem, SMS_PHONE, SMS_ASCII_CONTENT)
 
 
-def test_send_sms_text_weak_signal_warns_but_continues(caplog) -> None:
+def test_send_sms_text_weak_signal_warns_but_continues(monkeypatch) -> None:
+    warnings: list[str] = []
+    # 不用 caplog：alembic fileConfig 的 disable_existing_loggers 可能在
+    # 全量测试顺序里禁用应用 logger，改用打桩收集更稳。
+    monkeypatch.setattr(sms.logger, "warning", lambda msg, *a, **k: warnings.append(msg))
     lines = [
         "OK",
         "+CPIN: READY",
@@ -335,9 +340,8 @@ def test_send_sms_text_weak_signal_warns_but_continues(caplog) -> None:
         "+CMGS: 2",
     ]
     modem = ScriptedModem(lines)
-    with caplog.at_level(logging.WARNING, logger="app.services.sms"):
-        send_sms_text(modem, SMS_PHONE, SMS_ASCII_CONTENT)  # 不抛错
-    assert any("信号较弱" in record.message for record in caplog.records)
+    send_sms_text(modem, SMS_PHONE, SMS_ASCII_CONTENT)  # 不抛错
+    assert any("信号较弱" in w for w in warnings)
 
 
 def test_send_sms_text_rejects_empty_phone_or_content() -> None:

@@ -46,6 +46,13 @@ Excel 仅是导入来源，不作为数据库的最终结构。
 由「维系与回收」工作台（/due-work）提交，走既有双域审核链路，审核应用后扫描
 窗口自然失效。
 
+短信通知（A7670E 直发）：`scan_schedules.sms_enabled` 勾选且 `SMS_ENABLED=1`
+时，扫描生成任务同步入队 `sms_notifications`（status=pending，内容=渲染话术）；
+CallWorker 空闲时串行发送（与语音共用串口、绝不并发）：文本模式 IRA，非 ASCII
+内容自动转 UCS2，发送前查 CPIN/CSQ，等 `>` 提示符写入内容，`+CMGS: <mr>` 视为
+成功、`+CMS ERROR` 记录错误，失败不阻塞语音任务；`/sms` 页展示最近 200 条
+（号码脱敏）。
+
 ### 用户账号
 
 `users` 表含 `real_name`（实名）、`phone`（手机号）：创建用户时实名必填、手机
