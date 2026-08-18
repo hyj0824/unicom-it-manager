@@ -33,6 +33,41 @@ AFTER_PLAY_LINGER_SECONDS = 10
 END_EVENT_TYPES = {"voice_call_end", "no_carrier"}
 
 
+def modem_availability(
+    settings: Settings, worker_status: dict[str, object]
+) -> dict[str, str]:
+    """串口可用性的只读判断（仪表盘展示用）。
+
+    只检查「设备节点是否存在」和 Worker 最近一次运行结果，不打开串口、
+    不发送任何 AT 指令——页面请求不执行真实硬件操作（AGENTS.md 硬件安全）。
+    结果仅作提示，不作为拨号前提；真实验证仍以人工 smoke test 为准。
+    """
+
+    node_exists = Path(settings.modem_port).exists()
+    last_error = str(worker_status.get("last_error") or "")
+    last_result = str(worker_status.get("last_result") or "")
+    running = bool(worker_status.get("running"))
+    if not node_exists:
+        return {
+            "level": "fail",
+            "reason": f"串口设备节点 {settings.modem_port} 不存在，请检查接线与配置。",
+        }
+    if last_error:
+        return {
+            "level": "fail",
+            "reason": f"设备节点存在，但 Worker 最近运行出错：{last_error}。",
+        }
+    if running or last_result:
+        return {
+            "level": "ok",
+            "reason": "设备节点存在，Worker 最近一次运行无错误。",
+        }
+    return {
+        "level": "warn",
+        "reason": f"设备节点存在，但 Worker 尚未运行，无法确认串口通信（仅配置合理性判断）。",
+    }
+
+
 class CallWorker:
     """单通道任务消费者：领取任务 → 拨号 → 接通后播放 WAV → 分类收尾/重试。
 

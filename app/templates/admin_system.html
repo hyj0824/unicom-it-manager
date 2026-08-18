@@ -51,7 +51,8 @@
         <div><span>最近错误</span><strong>{{ worker_status.last_error or '-' }}</strong></div>
       </div>
       <div class="panel-foot">
-        <form method="post" action="/settings/worker">
+        <form method="post" action="/settings/worker"
+              {% if not worker_enabled %}data-confirm="启动 Worker 后将开始拨打队列中的任务（真实外呼），确认继续？"{% endif %}>
           <input type="hidden" name="enabled" value="{{ 0 if worker_enabled else 1 }}">
           <input type="hidden" name="next" value="/admin/system?tab=status">
           <button class="button secondary" type="submit">{{ '暂停 Worker' if worker_enabled else '启动 Worker' }}</button>

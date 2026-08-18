@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import Settings
-from ..models import Script
+from ..models import CallRecord, CallTask, CallbackPlan, Script
 from ..tts.none import NoneTTSProvider
 
 
@@ -23,3 +24,22 @@ def generate_script_audio(db: Session, script: Script, settings: Settings) -> No
     else:
         script.tts_status = "failed"
     db.add(script)
+
+
+def referencing_counts(db: Session, script: Script) -> dict[str, int]:
+    """统计引用该话术、导致无法硬删除的业务对象数量。"""
+
+    return {
+        "plans": db.scalar(
+            select(func.count(CallbackPlan.id)).where(CallbackPlan.script_id == script.id)
+        )
+        or 0,
+        "tasks": db.scalar(
+            select(func.count(CallTask.id)).where(CallTask.script_id == script.id)
+        )
+        or 0,
+        "records": db.scalar(
+            select(func.count(CallRecord.id)).where(CallRecord.script_id == script.id)
+        )
+        or 0,
+    }

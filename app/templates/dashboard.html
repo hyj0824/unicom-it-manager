@@ -44,6 +44,57 @@
     </div>
   </section>
 
+  <section class="panel">
+    <div class="panel-head">
+      <h2>外呼 Worker</h2>
+      <span class="status-pill {{ 'ok' if worker_status.running else 'muted' }}">
+        {{ '运行中' if worker_status.running else ('已暂停' if worker_enabled else '未启用') }}
+      </span>
+    </div>
+    {% if not worker_gate %}
+      <div class="alert warning">
+        <strong>CALL_WORKER_ENABLED</strong> 未在 <code>.env</code> 中开启（硬开关关闭），
+        Worker 进程不会启动，也不会拨号；确认硬件链路后在 <code>.env</code> 开启并重启服务。
+      </div>
+    {% endif %}
+    <div class="summary-grid">
+      <div>
+        <span>.env 硬开关</span>
+        <strong>{{ '已开启' if worker_gate else '关闭' }}</strong>
+      </div>
+      <div>
+        <span>运行时开关</span>
+        <strong>{{ '启用' if worker_enabled else '停用' }}</strong>
+      </div>
+      <div>
+        <span>串口可用性</span>
+        <strong>
+          <span class="status-pill {{ modem_status.level }}">{{ '正常' if modem_status.level == 'ok' else ('待验证' if modem_status.level == 'warn' else '不可用') }}</span>
+          <span class="subtle">{{ modem_status.reason }}</span>
+        </strong>
+      </div>
+      <div>
+        <span>当前通话</span>
+        <strong>
+          {% if worker_status.working %}
+            <span class="status-pill connected">拨号中</span>
+            #{{ worker_status.task_id or '-' }} {{ worker_status.current_number or '' }}
+          {% else %}
+            空闲
+          {% endif %}
+        </strong>
+      </div>
+      <div>
+        <span>已处理任务</span>
+        <strong>{{ worker_status.processed }}</strong>
+      </div>
+      <div>
+        <span>最近结果</span>
+        <strong>{{ worker_status.last_result|status_label if worker_status.last_result else '-' }}</strong>
+      </div>
+    </div>
+  </section>
+
   <div class="metrics">
     <div class="metric"><span>有效业务</span><strong>{{ counts.services }}</strong></div>
     <div class="metric"><span>有效设备</span><strong>{{ counts.devices }}</strong></div>

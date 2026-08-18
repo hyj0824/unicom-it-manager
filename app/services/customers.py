@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Contact, Customer, CustomerContact
+from ..models import (
+    BusinessService,
+    CallRecord,
+    CallTask,
+    CallbackPlan,
+    Contact,
+    Customer,
+    CustomerContact,
+)
 
 # 职责为空字符串的关联视为“客户默认联系人”。v1 演示的客户表单直接维护
 # 这一条关联；正式台账中的职责使用 contact_duty 字典（含客户拓展职责）。
@@ -59,3 +67,37 @@ def customer_phone_map(db: Session, customers: list[Customer]) -> dict[int, str]
         if link.customer_id not in result and link.contact and link.contact.phone:
             result[link.customer_id] = link.contact.phone
     return result
+
+
+def referencing_counts(db: Session, customer: Customer) -> dict[str, int]:
+    """统计引用该客户主体、导致无法硬删除的业务对象数量。
+
+    供删除确认与删除失败提示使用，避免只给笼统的完整性错误。
+    """
+
+    return {
+        "plans": db.scalar(
+            select(func.count(CallbackPlan.id)).where(CallbackPlan.customer_id == customer.id)
+        )
+        or 0,
+        "tasks": db.scalar(
+            select(func.count(CallTask.id)).where(CallTask.customer_id == customer.id)
+        )
+        or 0,
+        "records": db.scalar(
+            select(func.count(CallRecord.id)).where(CallRecord.customer_id == customer.id)
+        )
+        or 0,
+        "services": db.scalar(
+            select(func.count(BusinessService.id)).where(
+                BusinessService.customer_id == customer.id, BusinessService.is_active.is_(True)
+            )
+        )
+        or 0,
+        "contacts": db.scalar(
+            select(func.count(CustomerContact.id)).where(
+                CustomerContact.customer_id == customer.id
+            )
+        )
+        or 0,
+    }

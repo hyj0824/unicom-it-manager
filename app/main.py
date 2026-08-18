@@ -7,12 +7,13 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -28,6 +29,7 @@ from .database import SessionLocal, check_schema_current, get_db, get_schema_hea
 from .logging import configure_logging
 from .models import (
     AuditLog,
+    CALL_STATUSES,
     CallEvent,
     CallRecord,
     CallTask,
@@ -53,10 +55,10 @@ from .services import imports as import_service
 from .services import ledger as ledger_service
 from .services import reviews as review_service
 from .services import plans as plan_service
-from .services.call_worker import call_worker_service
-from .services.customers import customer_phone_map
+from .services.call_worker import call_worker_service, modem_availability
+from .services.customers import customer_phone_map, referencing_counts as customer_referencing_counts
 from .services.dictionaries import active_items, resolve_or_create_item
-from .services.scripts import generate_script_audio
+from .services.scripts import generate_script_audio, referencing_counts as script_referencing_counts
 from .services.settings import (
     SCHEDULER_ENABLED_KEY,
     CALL_WORKER_ENABLED_KEY,
@@ -420,6 +422,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         .order_by(ImportBatch.created_at.desc())
         .limit(5)
     ).all()
+    # 仪表盘 Worker 状态：硬开关（.env）、运行时开关、进程状态、当前通话，
+    # 以及串口可用性的只读判断（不打开串口、不发送 AT 指令）。
+    worker_status = call_worker_service.status()
     return render(
         request,
         "dashboard.html",
@@ -433,6 +438,10 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         counts=counts,
         recent_records=recent_records,
         recent_batches=recent_batches,
+        worker_status=worker_status,
+        worker_gate=settings.call_worker_enabled,
+        worker_enabled=is_worker_enabled(db),
+        modem_status=modem_availability(settings, worker_status),
     )
 
 
@@ -464,6 +473,7 @@ def customers_template(
     db: Session,
     error: str = "",
     contact_error: str = "",
+    call_error: str = "",
     form_data: dict[str, str] | None = None,
     contact_form: dict[str, str] | None = None,
     edit_customer: Customer | None = None,
@@ -478,6 +488,7 @@ def customers_template(
             .where(CustomerContact.customer_id == edit_customer.id)
             .order_by(CustomerContact.id.asc())
         ).all()
+    scripts = db.scalars(select(Script).order_by(Script.title.asc())).all()
     return render(
         request,
         "customers.html",
@@ -487,12 +498,14 @@ def customers_template(
         contacts=contacts,
         customer_phones=customer_phone_map(db, customers),
         duties=active_items(db, "contact_duty"),
+        scripts=scripts,
         edit_customer=edit_customer,
         edit_contact_id=edit_contact_id,
         form_data=form_data or {},
         contact_form=contact_form or {},
         error=error,
         contact_error=contact_error,
+        call_error=call_error,
     )
 
 
@@ -550,7 +563,13 @@ def customers_page(
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
-    return redirect_to("/contacts")
+    edit_customer = db.get(Customer, edit_id) if edit_id else None
+    return customers_template(
+        request,
+        db,
+        edit_customer=edit_customer,
+        edit_contact_id=edit_contact_id,
+    )
 
 
 @app.post("/customers")
@@ -589,6 +608,25 @@ async def customer_update(customer_id: int, request: Request, db: Session = Depe
 def customer_delete(customer_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
     customer = get_or_404(db, Customer, customer_id)
+    refs = customer_referencing_counts(db, customer)
+    # 负责人关联随客户删除级联移除，不构成删除障碍；只有业务/计划/任务/记录会阻止。
+    blocking = {key: refs[key] for key in ("services", "plans", "tasks", "records")}
+    if any(blocking.values()):
+        parts = []
+        for label, key in [
+            ("有效业务", "services"),
+            ("回访计划", "plans"),
+            ("外呼任务", "tasks"),
+            ("通话记录", "records"),
+        ]:
+            if blocking[key]:
+                parts.append(f"{label} {blocking[key]} 条")
+        return customers_template(
+            request,
+            db,
+            f"该客户仍被引用（{'、'.join(parts)}），不能删除；可考虑停用。",
+            status_code=400,
+        )
     try:
         db.delete(customer)
         db.commit()
@@ -597,10 +635,46 @@ def customer_delete(customer_id: int, request: Request, db: Session = Depends(ge
         return customers_template(
             request,
             db,
-            "该客户被业务、计划或通话记录引用，不能删除；可考虑停用。",
+            "该客户被其他数据引用，不能删除；可考虑停用。",
             status_code=400,
         )
     return redirect_to("/customers")
+
+
+@app.post("/customers/{customer_id}/call-now")
+async def customer_call_now(customer_id: int, request: Request, db: Session = Depends(get_db)):
+    """从客户发起「立即拨打一次」：生成独立的一次性任务，不改动任何计划。"""
+
+    auth.require_login(request)
+    customer = get_or_404(db, Customer, customer_id)
+    form = await request.form()
+    script = get_or_404(db, Script, _form_int(form, "script_id") or 0)
+    contact_id = _form_int(form, "contact_id")
+    contact = db.get(Contact, contact_id) if contact_id else None
+    try:
+        plan_service.create_manual_call_task(
+            db,
+            customer,
+            script,
+            contact=contact,
+            message="网页端从客户发起立即拨打。",
+            source="manual",
+        )
+    except ValueError as exc:
+        return customers_template(
+            request,
+            db,
+            call_error=str(exc),
+            edit_customer=customer,
+            status_code=400,
+        )
+    ledger_service.log_action(
+        db, "dial", _user_id(request), "customer", customer.id,
+        json.dumps({"action": "call_now", "script_id": script.id}, ensure_ascii=False),
+        _client_ip(request),
+    )
+    db.commit()
+    return redirect_to("/calls")
 
 
 @app.post("/customers/{customer_id}/contacts")
@@ -656,6 +730,10 @@ def contact_delete(contact_id: int, request: Request, db: Session = Depends(get_
     contact = get_or_404(db, Contact, contact_id)
     contact.is_active = False
     db.commit()
+    # 从客户详情发起时回到客户上下文，否则回通讯录目录。
+    customer_id = _form_int(request.query_params, "customer_id")
+    if customer_id:
+        return redirect_to(f"/customers?edit_id={customer_id}")
     return redirect_to("/contacts")
 
 
@@ -1726,6 +1804,18 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
 def script_delete(script_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
     script = get_or_404(db, Script, script_id)
+    refs = script_referencing_counts(db, script)
+    if any(refs.values()):
+        parts = []
+        for label, key in [("回访计划", "plans"), ("外呼任务", "tasks"), ("通话记录", "records")]:
+            if refs[key]:
+                parts.append(f"{label} {refs[key]} 条")
+        return scripts_template(
+            request,
+            db,
+            f"该话术仍被引用（{'、'.join(parts)}），不能删除；可先更换引用的话术。",
+            status_code=400,
+        )
     try:
         db.delete(script)
         db.commit()
@@ -1756,6 +1846,8 @@ def plans_template(
     request: Request,
     db: Session,
     error: str = "",
+    notice: str = "",
+    next_run_preview: datetime | None = None,
     form_data: dict[str, str] | None = None,
     edit_plan: CallbackPlan | None = None,
     status_code: int = 200,
@@ -1776,13 +1868,24 @@ def plans_template(
         edit_plan=edit_plan,
         form_data=form_data or {},
         error=error,
+        notice=notice,
+        next_run_preview=next_run_preview,
     )
 
 
 def _parse_plan_form(db: Session, form) -> tuple[Customer, Script, Contact, str, datetime | None, str, str, bool]:
-    customer = get_or_404(db, Customer, int(form.get("customer_id", 0)))
-    script = get_or_404(db, Script, int(form.get("script_id", 0)))
-    contact = get_or_404(db, Contact, int(form.get("contact_id", 0)))
+    customer_id = _form_int(form, "customer_id")
+    if not customer_id:
+        raise ValueError("请选择客户主体。")
+    customer = get_or_404(db, Customer, customer_id)
+    script_id = _form_int(form, "script_id")
+    if not script_id:
+        raise ValueError("请选择话术。")
+    script = get_or_404(db, Script, script_id)
+    contact_id = _form_int(form, "contact_id")
+    if not contact_id:
+        raise ValueError("请选择拨打负责人。")
+    contact = get_or_404(db, Contact, contact_id)
     if not contact.is_active or not contact.phone:
         raise ValueError("请选择一位有有效联系电话的通讯录人员。")
     trigger_type = str(form.get("trigger_type", "once")).strip()
@@ -1797,26 +1900,35 @@ def _parse_plan_form(db: Session, form) -> tuple[Customer, Script, Contact, str,
 def plans_page(
     request: Request,
     edit_id: int | None = None,
+    notice: str = "",
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
     edit_plan = db.get(CallbackPlan, edit_id) if edit_id else None
-    return plans_template(request, db, edit_plan=edit_plan)
+    return plans_template(request, db, edit_plan=edit_plan, notice=notice)
 
 
 @app.post("/plans")
 async def plan_create(request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
     form = await request.form()
+    next_preview: datetime | None = None
     try:
         customer, script, contact, trigger_type, run_at, cron_expr, timezone_name, enabled = _parse_plan_form(db, form)
+        # 先算下次执行时间再落库：校验不通过时，表单页仍可展示合法输入的预览。
+        next_preview = plan_service.compute_next_run_at(
+            trigger_type, run_at, cron_expr, timezone_name
+        )
         plan_service.create_plan(db, customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled, contact)
     except (ValueError, HTTPException) as exc:
         if isinstance(exc, HTTPException):
             raise
-        return plans_template(request, db, str(exc), dict(form), status_code=400)
+        return plans_template(
+            request, db, str(exc), next_run_preview=next_preview, form_data=dict(form), status_code=400
+        )
     db.commit()
-    return redirect_to("/plans")
+    notice = f"计划已保存，下次执行时间：{format_dt(next_preview, timezone_name)}（{timezone_name}）。"
+    return redirect_to(f"/plans?notice={quote(notice)}")
 
 
 @app.post("/plans/{plan_id}/edit")
@@ -1824,13 +1936,20 @@ async def plan_update(plan_id: int, request: Request, db: Session = Depends(get_
     auth.require_login(request)
     plan = get_or_404(db, CallbackPlan, plan_id)
     form = await request.form()
+    next_preview: datetime | None = None
     try:
         customer, script, contact, trigger_type, run_at, cron_expr, timezone_name, enabled = _parse_plan_form(db, form)
+        next_preview = plan_service.compute_next_run_at(
+            trigger_type, run_at, cron_expr, timezone_name
+        )
         plan_service.update_plan(plan, customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled, contact)
     except ValueError as exc:
-        return plans_template(request, db, str(exc), dict(form), edit_plan=plan, status_code=400)
+        return plans_template(
+            request, db, str(exc), next_run_preview=next_preview, form_data=dict(form), edit_plan=plan, status_code=400
+        )
     db.commit()
-    return redirect_to("/plans")
+    notice = f"计划已保存，下次执行时间：{format_dt(next_preview, timezone_name)}（{timezone_name}）。"
+    return redirect_to(f"/plans?edit_id={plan.id}&notice={quote(notice)}")
 
 
 @app.post("/plans/{plan_id}/delete")
@@ -1878,30 +1997,150 @@ def plan_call_now(plan_id: int, request: Request, db: Session = Depends(get_db))
         _client_ip(request),
     )
     db.commit()
-    return redirect_to("/calls")
+    return redirect_to("/calls?notice=" + quote("已生成立即拨打任务，请到通话记录查看。"))
 
 
 # ---------------------------------------------------------------- 通话记录
 
 
+CALLS_PAGE_SIZE = 25
+# 通话记录列表的候选状态筛选值（与 models.CALL_STATUSES 一致）。
+CALL_STATUS_OPTIONS = sorted(CALL_STATUSES)
+
+
+def _date_filter_bound(value: str, day_start: bool) -> datetime | None:
+    """把 date 输入（YYYY-MM-DD）转成当日 00:00 / 23:59（计划时区），供区间筛选。"""
+
+    value = value.strip()
+    if not value:
+        return None
+    if len(value) == 10 and value[4] == "-" and value[7] == "-":
+        value = f"{value}T{'00:00' if day_start else '23:59'}"
+    try:
+        return plan_service.parse_datetime_local(value, settings.default_timezone)
+    except ValueError as exc:
+        raise ValueError(f"日期筛选格式不正确：{exc}") from exc
+
+
 @app.get("/calls")
-def calls_page(request: Request, db: Session = Depends(get_db)):
+def calls_page(
+    request: Request,
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    customer_id: int | None = None,
+    page: int = 1,
+    error: str = "",
+    notice: str = "",
+    db: Session = Depends(get_db),
+):
     auth.require_login(request)
-    records = db.scalars(select(CallRecord).order_by(CallRecord.created_at.desc())).all()
-    tasks = db.scalars(select(CallTask).order_by(CallTask.due_at.asc()).limit(20)).all()
-    return render(request, "calls.html", db, records=records, tasks=tasks)
+    invalid_filter = ""
+    try:
+        start_bound = _date_filter_bound(date_from, True)
+        end_bound = _date_filter_bound(date_to, False)
+    except ValueError as exc:
+        invalid_filter = str(exc)
+        start_bound = end_bound = None
+
+    query = select(CallRecord)
+    if status:
+        query = query.where(CallRecord.status == status)
+    if customer_id:
+        query = query.where(CallRecord.customer_id == customer_id)
+    if start_bound is not None:
+        query = query.where(CallRecord.created_at >= start_bound)
+    if end_bound is not None:
+        query = query.where(CallRecord.created_at <= end_bound)
+
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    page = max(1, page)
+    last_page = max(1, (total + CALLS_PAGE_SIZE - 1) // CALLS_PAGE_SIZE)
+    page = min(page, last_page)
+    records = db.scalars(
+        query.order_by(CallRecord.created_at.desc())
+        .offset((page - 1) * CALLS_PAGE_SIZE)
+        .limit(CALLS_PAGE_SIZE)
+    ).all()
+    # 队列先展示进行中任务（queued/dialing/connected），再按到期时间排终态任务。
+    tasks = db.scalars(
+        select(CallTask)
+        .order_by(
+            case((CallTask.status.in_(["queued", "dialing", "connected"]), 0), else_=1),
+            CallTask.due_at.asc(),
+        )
+        .limit(50)
+    ).all()
+    customers = db.scalars(select(Customer).order_by(Customer.name.asc())).all()
+    return render(
+        request,
+        "calls.html",
+        db,
+        records=records,
+        tasks=tasks,
+        customers=customers,
+        status_options=CALL_STATUS_OPTIONS,
+        status_filter=status,
+        date_from=date_from,
+        date_to=date_to,
+        customer_id=customer_id or 0,
+        page=page,
+        last_page=last_page,
+        total=total,
+        page_size=CALLS_PAGE_SIZE,
+        error=error or invalid_filter,
+        notice=notice,
+    )
 
 
 @app.get("/calls/{record_id}")
-def call_detail(record_id: int, request: Request, db: Session = Depends(get_db)):
+def call_detail(
+    record_id: int,
+    request: Request,
+    error: str = "",
+    notice: str = "",
+    db: Session = Depends(get_db),
+):
     auth.require_login(request)
     record = get_or_404(db, CallRecord, record_id)
     events = db.scalars(
         select(CallEvent)
         .where(CallEvent.call_record_id == record.id)
-        .order_by(CallEvent.created_at.asc())
+        .order_by(CallEvent.created_at.asc(), CallEvent.id.asc())
     ).all()
-    return render(request, "call_detail.html", db, record=record, events=events)
+    return render(
+        request,
+        "call_detail.html",
+        db,
+        record=record,
+        events=events,
+        error=error,
+        notice=notice,
+    )
+
+
+@app.post("/tasks/{task_id}/requeue")
+async def task_requeue(task_id: int, request: Request, db: Session = Depends(get_db)):
+    """人工重新入队：把终态任务重置为 queued，不新建任务、不改动原计划。"""
+
+    auth.require_login(request)
+    task = get_or_404(db, CallTask, task_id)
+    form = await request.form()
+    next_url = str(form.get("next", "/calls"))
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        next_url = "/calls"
+    try:
+        plan_service.requeue_call_task(db, task, message="网页端人工重新入队，等待队列调度。")
+    except ValueError as exc:
+        db.rollback()
+        return redirect_to(f"{next_url}?error={quote(str(exc))}")
+    ledger_service.log_action(
+        db, "requeue", _user_id(request), "call_task", task.id,
+        json.dumps({"action": "manual_requeue"}, ensure_ascii=False),
+        _client_ip(request),
+    )
+    db.commit()
+    return redirect_to(f"{next_url}?notice={quote('任务已重新入队，等待 Worker 领取。')}")
 
 
 @app.post("/calls/{record_id}/feedback")

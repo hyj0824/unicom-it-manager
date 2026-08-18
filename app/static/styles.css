@@ -538,6 +538,16 @@ textarea {
   background: #fdecc8;
 }
 
+.status-pill.warn {
+  color: #4f3200;
+  background: #fdecc8;
+}
+
+.status-pill.fail {
+  color: #ffffff;
+  background: var(--danger);
+}
+
 .status-pill.draft,
 .status-pill.submitted,
 .status-pill.rejected,
@@ -995,4 +1005,22 @@ textarea {
   white-space: nowrap;
   font-size: 12px;
   color: var(--muted);
+}
+
+.row-error td {
+  background: #fdf1f0;
+}
+
+.select-inline {
+  min-height: 30px;
+  max-width: 150px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+.pagination {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
 }
