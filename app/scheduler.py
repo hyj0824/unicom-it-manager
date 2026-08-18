@@ -47,10 +47,16 @@ def cron_matches_now(cron_expr: str, timezone_name: str, now: datetime | None = 
 
 
 def _run_scan(db, schedule: ScanSchedule) -> int:
-    """按契约调用扫描实现；模块由另一工作流并行开发，延迟导入。"""
+    """按契约调用扫描实现。
 
-    from .services import scans as scan_service
+    用 ``importlib.import_module`` 而非 ``from ... import``：import_module 优先
+    从 sys.modules 解析模块，测试里注入的假 scans 模块才能稳定生效（包属性
+    缓存会绕过 sys.modules）。
+    """
 
+    import importlib
+
+    scan_service = importlib.import_module("app.services.scans")
     return scan_service.run_scan_for_schedule(db, schedule)
 
 
