@@ -123,6 +123,7 @@ DOMAIN_LABELS = {
 SCAN_TYPE_LABELS = {
     "due_renewal": "到期维系",
     "device_recycle": "设备回收",
+    "review_stuck": "审核卡单",
 }
 
 # 通知任务来源（CallTask.source）；历史 callback_plans 生成的任务仍为 scheduled。
@@ -130,6 +131,7 @@ SOURCE_LABELS = {
     "manual": "立即拨打",
     "due_renewal": "到期维系扫描",
     "device_recycle": "设备回收扫描",
+    "review_stuck": "审核卡单提醒扫描",
     "scheduled": "计划触发",
 }
 
@@ -1827,7 +1829,7 @@ def _parse_scan_schedule_form(db: Session, form) -> dict:
         raise ValueError("扫描配置名称不能为空。")
     scan_type = str(form.get("scan_type", "")).strip()
     if scan_type not in SCAN_TYPE_LABELS:
-        raise ValueError("扫描类型无效：应为「到期维系」或「设备回收」。")
+        raise ValueError("扫描类型无效。")
     script_id = _form_int(form, "script_id")
     if script_id is not None and db.get(Script, script_id) is None:
         raise ValueError("所选话术模板不存在。")

@@ -188,13 +188,21 @@ def test_render_script_template_tolerates_whitespace_in_placeholders() -> None:
 
 
 def test_default_templates_cover_placeholder_convention() -> None:
-    expected = {"客户名称", "业务号码", "协议到期日", "负责人姓名", "设备编码", "扫描类型"}
-    assert set(DEFAULT_TEMPLATES) == {"due_renewal", "device_recycle"}
-    for template in DEFAULT_TEMPLATES.values():
+    expected = {"客户名称", "业务号码", "协议到期日", "负责人姓名", "设备编码", "扫描类型", "审核单标题"}
+    assert set(DEFAULT_TEMPLATES) == {"due_renewal", "device_recycle", "review_stuck"}
+    for scan_type, template in DEFAULT_TEMPLATES.items():
         found = set(re.findall(r"\{\{\s*([^{}]+?)\s*\}\}", template))
         assert found, "默认话术必须包含占位符"
         assert found <= expected, f"出现约定外的占位符: {found - expected}"
-        assert "{{设备编码}}" in template or found == expected or "{{协议到期日}}" in template
+        assert "{{客户名称}}" in template
+        assert "{{业务号码}}" in template
+        assert "{{负责人姓名}}" in template
+        if scan_type == "review_stuck":
+            assert "{{审核单标题}}" in template
+        elif scan_type == "device_recycle":
+            assert "{{设备编码}}" in template
+        else:
+            assert "{{协议到期日}}" in template
 
 
 # ---------------------------------------------------------------- 到期维系扫描

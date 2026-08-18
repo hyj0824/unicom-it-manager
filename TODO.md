@@ -100,7 +100,7 @@
   类型（到期维系 / 设备回收）、每日时段或每周几（cron）、时区、提前天数、
   启用/停用；调度器每分钟按 cron 匹配触发。
 - [x] `call_tasks` 保留 `plan_id` 可空，新增 `scan_schedule_id` 与 `meta_json`
-  快照；任务来源由 `source` 区分（`due_renewal` / `device_recycle` / `manual`）。
+  快照；任务来源由 `source` 区分（`due_renewal` / `device_recycle` / `review_stuck` / `manual`）。
 
 ### 5. 用户实名与按步骤通知
 
@@ -109,7 +109,7 @@
 - [ ] 业务维护人 = 客户经理、网络维护人 = 网络维护责任人：哪一步有待办就
   通知哪一步的负责人（扫描已按职责取 `customer_contacts` 电话，通知目标
   与 User 台账的打通列为下一步）。
-- [ ] 审核卡单提醒：审核流程停滞时通知审核人员（话术模板 + 定时检查）。
+- [x] 审核卡单提醒：审核流程停滞时通知审核人员（source=`review_stuck`，话术模板 + 定时检查；阈值小时数取自 app_settings `review_stuck_hours`，默认 24，同卡单同日去重）。
 
 ### 0. 定位落地与通知通道
 
