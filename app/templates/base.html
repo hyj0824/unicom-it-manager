@@ -21,8 +21,9 @@
             <a class="{% if path.startswith('/ledger') %}active{% endif %}" href="/ledger">业务台账</a>
             <a class="{% if path.startswith('/devices') %}active{% endif %}" href="/devices">网络设备</a>
           </details>
-          <details class="nav-section" {% if path.startswith('/reviews') or path.startswith('/missing') or path.startswith('/imports') or path.startswith('/exports') %}open{% endif %}>
+          <details class="nav-section" {% if path.startswith('/reviews') or path.startswith('/due-work') or path.startswith('/missing') or path.startswith('/imports') or path.startswith('/exports') %}open{% endif %}>
             <summary>数据管理</summary>
+            <a class="{% if path.startswith('/due-work') %}active{% endif %}" href="/due-work">维系与回收</a>
             <a class="{% if path.startswith('/reviews') %}active{% endif %}" href="/reviews">审核中心</a>
             <a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>
             <a class="{% if path.startswith('/imports') or path.startswith('/exports') %}active{% endif %}" href="/imports">导入导出</a>

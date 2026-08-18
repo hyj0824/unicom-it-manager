@@ -54,6 +54,7 @@ from .scheduler import scheduler_service
 from .services import imports as import_service
 from .services import ledger as ledger_service
 from .services import reviews as review_service
+from .services import change_requests as change_request_service
 from .services import plans as plan_service
 from .services.call_worker import call_worker_service, modem_availability
 from .services.backups import backup_service
@@ -898,6 +899,108 @@ def reviews_page(request: Request, status_filter: str = "", db: Session = Depend
         status_filter=status_filter,
         status_counts=status_counts,
     )
+
+
+# ---------------------------------------------------------------- 维系与回收工作台
+
+
+def due_work_template(
+    request: Request,
+    db: Session,
+    error: str = "",
+    notice: str = "",
+    status_code: int = 200,
+):
+    timezone_name = settings.default_timezone
+    return render(
+        request,
+        "due_work.html",
+        db,
+        status_code=status_code,
+        lead_days=change_request_service.due_renewal_lead_days(db),
+        due_rows=change_request_service.list_due_renewal_rows(db, timezone_name=timezone_name),
+        device_rows=change_request_service.list_recycle_device_rows(db, timezone_name=timezone_name),
+        min_date=datetime.now(plan_service.get_zone(timezone_name)).date().isoformat(),
+        error=error,
+        notice=notice,
+    )
+
+
+@app.get("/due-work")
+def due_work_page(
+    request: Request,
+    error: str = "",
+    notice: str = "",
+    db: Session = Depends(get_db),
+):
+    auth.require_login(request)
+    return due_work_template(request, db, error=error, notice=notice)
+
+
+def _submit_business_request(
+    service_id: int,
+    request: Request,
+    db: Session,
+    updates: dict,
+    reason: str,
+) -> RedirectResponse:
+    """续签 / 退网共用提交路径：校验、落库、审计，错误回显工作台。"""
+
+    service = get_or_404(db, BusinessService, service_id)
+    try:
+        change_set = change_request_service.submit_business_update(
+            db, service, updates, reason, _user_id(request)
+        )
+        ledger_service.log_action(
+            db, "submit_review", _user_id(request), "change_set", change_set.id,
+            json.dumps({"domain": "business", "business_service_id": service.id, "updates": updates}, ensure_ascii=False),
+            _client_ip(request),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return due_work_template(request, db, error=str(exc), status_code=400)
+    return redirect_to(f"/reviews/{change_set.id}")
+
+
+@app.post("/due-work/business/{service_id}/renew")
+async def due_work_renew(service_id: int, request: Request, db: Session = Depends(get_db)):
+    auth.require_permission(db, request, "submit", "business")
+    form = await request.form()
+    updates = {"agreement_expires_at": str(form.get("agreement_expires_at", "")).strip()}
+    reason = str(form.get("reason", "")).strip()
+    return _submit_business_request(service_id, request, db, updates, reason)
+
+
+@app.post("/due-work/business/{service_id}/retire")
+async def due_work_retire(service_id: int, request: Request, db: Session = Depends(get_db)):
+    auth.require_permission(db, request, "submit", "business")
+    form = await request.form()
+    updates = {"service_status": change_request_service.RETIRE_STATUS_LABEL}
+    reason = str(form.get("reason", "")).strip()
+    return _submit_business_request(service_id, request, db, updates, reason)
+
+
+@app.post("/due-work/device/{device_id}/recover")
+async def due_work_recover(device_id: int, request: Request, db: Session = Depends(get_db)):
+    auth.require_permission(db, request, "submit", "network")
+    device = get_or_404(db, NetworkDevice, device_id)
+    form = await request.form()
+    reason = str(form.get("reason", "")).strip()
+    try:
+        change_set = change_request_service.submit_device_recovery(
+            db, device, reason, _user_id(request)
+        )
+        ledger_service.log_action(
+            db, "submit_review", _user_id(request), "change_set", change_set.id,
+            json.dumps({"domain": "network", "operation": "recover", "device_id": device.id}, ensure_ascii=False),
+            _client_ip(request),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return due_work_template(request, db, error=str(exc), status_code=400)
+    return redirect_to(f"/reviews/{change_set.id}")
 
 
 # ---------------------------------------------------------------- 缺项工作台
