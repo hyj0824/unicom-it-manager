@@ -41,7 +41,7 @@ def db(tmp_path: Path):
 
 @pytest.fixture()
 def fake_modem(monkeypatch):
-    """替换串口与 aplay：worker 只与内存中的假串口交互。"""
+    """替换串口与 ffplay：worker 只与内存中的假串口交互，不真实播放。"""
 
     from app.services import call_worker as worker_module
 
@@ -78,7 +78,7 @@ def fake_modem(monkeypatch):
         holder["play_success"] = play_success
         monkeypatch.setattr(
             worker_module,
-            "play_wav",
+            "play_audio",
             lambda path, dev: PlaybackResult(
                 play_success, 0 if play_success else 1, "" if play_success else "playback failed"
             ),

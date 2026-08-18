@@ -1718,7 +1718,7 @@ SYSTEM_TABS = {"status", "logs", "settings"}
 ENV_SETTINGS = [
     ("MODEM_PORT", lambda s: s.modem_port, "A7670E 串口设备路径"),
     ("MODEM_BAUD", lambda s: s.modem_baud, "串口波特率"),
-    ("AUDIO_DEVICE", lambda s: s.audio_device, "aplay 播放设备（ALSA）"),
+    ("AUDIO_DEVICE", lambda s: s.audio_device, "ffplay 播放设备（ALSA）"),
     ("CALL_CONNECT_TIMEOUT_SECONDS", lambda s: s.call_connect_timeout_seconds, "接通等待超时兜底（秒）"),
     ("MIN_CONNECTED_SECONDS", lambda s: s.min_connected_seconds, "接通后有效时长阈值（秒）"),
     ("RETRY_DELAY_SECONDS", lambda s: s.retry_delay_seconds, "自动重试延迟（秒）"),
@@ -1947,12 +1947,13 @@ def script_generate_audio(script_id: int, request: Request, db: Session = Depend
 
 @app.get("/audio/{filename:path}")
 def script_audio_file(filename: str, request: Request):
-    """只读话术音频：仅服务 data/audio/ 下的 .wav，需登录，防路径穿越。"""
+    """只读话术音频：仅服务 data/audio/ 下的 WAV/MP3，需登录，防路径穿越。"""
     auth.require_login(request)
     path = resolve_audio_file(filename)
     if path is None:
         raise HTTPException(status_code=404)
-    return FileResponse(path, media_type="audio/wav")
+    media_type = "audio/mpeg" if path.suffix.lower() == ".mp3" else "audio/wav"
+    return FileResponse(path, media_type=media_type)
 
 
 # ---------------------------------------------------------------- 回访计划

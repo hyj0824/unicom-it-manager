@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..audio import play_wav
+from ..audio import play_audio
 from ..config import Settings, get_settings
 from ..database import SessionLocal
 from ..modem.client import ModemClient
@@ -71,7 +71,7 @@ def modem_availability(
 class CallWorker:
     """单通道任务消费者：领取任务 → 拨号 → 接通后播放 WAV → 分类收尾/重试。
 
-    只有这里访问串口和 aplay；调用方负责事务提交。事件逐条写入
+    只有这里访问串口和 ffplay；调用方负责事务提交。事件逐条写入
     `CallEvent`，串口原始行保存在 `raw_line`。
     """
 
@@ -252,15 +252,15 @@ class CallWorker:
                     message=f"Playing {wav_path} on {settings.audio_device}",
                 )
             )
-            play_result = play_wav(wav_path, settings.audio_device)
+            play_result = play_audio(wav_path, settings.audio_device)
             db.add(
                 CallEvent(
                     call_record=record,
                     event_type="audio_end",
                     message=(
-                        f"aplay exit={play_result.returncode} {play_result.message}".strip()
+                        f"ffplay exit={play_result.returncode} {play_result.message}".strip()
                         if play_result.message
-                        else f"aplay exit={play_result.returncode}"
+                        else f"ffplay exit={play_result.returncode}"
                     ),
                 )
             )

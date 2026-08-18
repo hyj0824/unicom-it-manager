@@ -12,7 +12,7 @@ from __future__ import annotations
 - 话术页：失败状态展示、重生成入口结果反馈、试听按钮仅对 data/audio 内
   的 WAV 渲染。
 
-不接触真实串口与 aplay；TestClient 不用上下文管理器，避免启动
+不接触真实串口与 ffplay；TestClient 不用上下文管理器，避免启动
 Scheduler / Call Worker 线程。音频写入通过 monkeypatch 重定向到临时目录。
 """
 
@@ -88,7 +88,9 @@ def login(client: TestClient, password: str = ADMIN_PASSWORD) -> None:
 
 
 class _FakeTTSProvider:
-    """成功 Provider：每次调用写一个 WAV 并记录调用次数。"""
+    """成功 Provider：每次调用写一个音频文件并记录调用次数。"""
+
+    output_suffix = ".wav"
 
     def __init__(self, out_dir: Path):
         self.out_dir = out_dir
@@ -96,13 +98,15 @@ class _FakeTTSProvider:
 
     def generate(self, text: str) -> TTSResult:
         self.calls += 1
-        out = self.out_dir / f"provider-{self.calls}.wav"
+        out = self.out_dir / f"provider-{self.calls}{self.output_suffix}"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(b"RIFF-fake-wave")
-        return TTSResult(success=True, wav_path=str(out))
+        return TTSResult(success=True, audio_path=str(out))
 
 
 class _FailingTTSProvider:
+    output_suffix = ".wav"
+
     def generate(self, text: str) -> TTSResult:
         raise RuntimeError("provider exploded")
 
@@ -137,6 +141,10 @@ def test_script_audio_path_naming_and_content_hash() -> None:
     assert p1.name != p4.name  # 话术 id 参与命名
     assert re.fullmatch(r"script-\d+-[0-9a-f]{12}\.wav", p1.name)
     assert p1.parent == audio_module.AUDIO_DIR  # 位于 data/audio/
+    # 扩展名由 Provider 决定（edge-tts 输出 .mp3）。
+    mp3 = audio_module.script_audio_path(3, "您好，这里是联通。", ext=".mp3")
+    assert re.fullmatch(r"script-\d+-[0-9a-f]{12}\.mp3", mp3.name)
+    assert mp3.with_suffix("") == p1.with_suffix("")  # 同一正文同一基础名
 
 
 def test_write_wav_atomic_writes_and_overwrites(tmp_path: Path) -> None:
@@ -166,19 +174,23 @@ def test_resolve_audio_file_serves_only_audio_dir(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr(audio_module, "AUDIO_DIR", tmp_path)
     wav = tmp_path / "script-1-abcdef123456.wav"
     wav.write_bytes(b"RIFF")
+    mp3 = tmp_path / "script-1-abcdef123456.mp3"
+    mp3.write_bytes(b"ID3")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "nested.wav").write_bytes(b"RIFF2")
     (tmp_path / "secret.txt").write_text("no")
 
     assert audio_module.resolve_audio_file("script-1-abcdef123456.wav") == wav
+    assert audio_module.resolve_audio_file("script-1-abcdef123456.mp3") == mp3
     assert audio_module.resolve_audio_file("sub/nested.wav") is not None  # 允许子目录
     # 越界与非法输入一律拒绝。
     assert audio_module.resolve_audio_file("../secret.txt") is None
     assert audio_module.resolve_audio_file("..") is None
     assert audio_module.resolve_audio_file("/etc/passwd") is None
     assert audio_module.resolve_audio_file("a/../../secret.txt") is None
-    assert audio_module.resolve_audio_file("secret.txt") is None  # 非 .wav
+    assert audio_module.resolve_audio_file("secret.txt") is None  # 非音频扩展名
     assert audio_module.resolve_audio_file("missing.wav") is None
+    assert audio_module.resolve_audio_file("missing.mp3") is None
     assert audio_module.resolve_audio_file("") is None
 
     # symlink 指向目录外 → resolve 后越界，拒绝。
@@ -196,6 +208,37 @@ def test_script_audio_url_only_for_audio_dir(tmp_path: Path, monkeypatch) -> Non
     assert script_service.script_audio_url(external) == ""
     empty = Script(title="t", body="b")
     assert script_service.script_audio_url(empty) == ""
+
+
+def test_generate_audio_mp3_provider_installs_mp3_and_previews(client, tmp_path, monkeypatch) -> None:
+    """edge 风格 Provider（输出 .mp3）：落盘 .mp3、试听路由返回 audio/mpeg。"""
+    login(client)
+    monkeypatch.setattr(audio_module, "AUDIO_DIR", tmp_path)
+    provider = _FakeTTSProvider(tmp_path / "provider-out")
+    provider.output_suffix = ".mp3"
+    monkeypatch.setattr(script_service, "get_tts_provider", lambda s: provider)
+    script_id = _create_script_via_web(client)
+
+    resp = client.post(f"/scripts/{script_id}/generate-audio", follow_redirects=True)
+    assert resp.status_code == 200
+    assert "音频已生成" in resp.text
+
+    with SessionLocal() as session:
+        script = session.get(Script, script_id)
+        assert script.tts_status == "generated"
+        name = Path(script.wav_path).name
+        assert name.endswith(".mp3")
+
+    assert f"/audio/{name}" in resp.text
+    audio = client.get(f"/audio/{name}")
+    assert audio.status_code == 200
+    assert audio.headers["content-type"].startswith("audio/mpeg")
+    assert audio.content == b"RIFF-fake-wave"
+
+    # 正文未变 → 缓存命中（同样按 .mp3 后缀查找）。
+    resp2 = client.post(f"/scripts/{script_id}/generate-audio", follow_redirects=True)
+    assert "无需重新生成" in resp2.text
+    assert provider.calls == 1
 
 
 # ---------------------------------------------------------------- 生成服务：成功 / 失败 / 缓存
@@ -313,6 +356,7 @@ def test_audio_route_rejects_traversal_and_non_wav(client, tmp_path, monkeypatch
     login(client)
     monkeypatch.setattr(audio_module, "AUDIO_DIR", tmp_path)
     (tmp_path / "ok.wav").write_bytes(b"RIFF")
+    (tmp_path / "ok.mp3").write_bytes(b"ID3-fake-mp3")
     (tmp_path / "secret.txt").write_text("top secret")
 
     for bad in [
@@ -321,6 +365,7 @@ def test_audio_route_rejects_traversal_and_non_wav(client, tmp_path, monkeypatch
         "%2Fetc%2Fpasswd",
         "ok.txt",
         "missing.wav",
+        "missing.mp3",
     ]:
         resp = client.get(f"/audio/{bad}")
         assert resp.status_code == 404, bad
@@ -328,6 +373,10 @@ def test_audio_route_rejects_traversal_and_non_wav(client, tmp_path, monkeypatch
     good = client.get("/audio/ok.wav")
     assert good.status_code == 200
     assert good.content == b"RIFF"
+    mp3 = client.get("/audio/ok.mp3")
+    assert mp3.status_code == 200
+    assert mp3.headers["content-type"].startswith("audio/mpeg")
+    assert mp3.content == b"ID3-fake-mp3"
 
 
 def test_scripts_page_preview_only_for_managed_audio(client, tmp_path, monkeypatch) -> None:

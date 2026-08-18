@@ -19,8 +19,8 @@ Call Worker 线程都在这一个进程内启动（`app/main.py` 的 lifespan）
 - SQLite 单写者约束（`docs/migration-plan.md`）：**不要**给 uvicorn 加
   `--workers N`，**不要**启动第二个服务实例，也不要在 Worker 运行时同时跑
   硬件 smoke test（会抢串口）。
-- 备份/定期任务尚未实现（见 TODO「P1：备份与灾备」）；未来若备份任务在
-  Web 进程内实现，会随本单元一起运行，无需新增服务单元。
+- 备份/定期任务已实现（见 README「备份与灾备」）：随 Web 进程运行，无需新增
+  服务单元，配置项见 `.env.example` 的 `BACKUP_*`。
 
 ## 1. 前置条件
 
@@ -28,7 +28,8 @@ Call Worker 线程都在这一个进程内启动（`app/main.py` 的 lifespan）
 # 系统信息核对（示例输出）
 uname -m                 # aarch64
 python3 --version        # 3.11.x（项目要求 >=3.11，Rock Pi 3A Debian 实测 3.11.2）
-aplay --version          # 需要 alsa-utils（缺失时：sudo apt install alsa-utils）
+ffplay --version         # 播放必选依赖，由 ffmpeg 包提供（缺失时：sudo apt install ffmpeg）
+aplay -l                 # 声卡诊断可选（alsa-utils），用于核对 AUDIO_DEVICE
 git --version
 ```
 
@@ -115,14 +116,28 @@ cat /proc/asound/cards
 card 1: rk809 [rockchip-rk809], device 0: rk809-hifi rk809-hifi-0
 ```
 
-确认设备后用 `aplay` 试播一个 WAV：
+确认设备后用 `ffplay` 试播一个音频文件（支持 WAV/MP3 等 ffmpeg 可解码格式）：
 
 ```bash
-aplay -D plughw:1,0 /path/to/test.wav
+ffplay -nodisp -autoexit -loglevel quiet -audio_device plughw:1,0 /path/to/test.wav
 ```
 
 - `plughw:1,0` 中 `1` 是 `aplay -l` 显示的 card 编号，`0` 是 device 编号；
   编号因启动顺序可能变化，务必以 `aplay -l` 实机输出为准。
+- `-audio_device` 需要 ffmpeg ≥ 6.0（`ffplay -h | grep audio_device` 可确认）；
+  Debian bookworm 默认 ffmpeg 5.1 **不支持**该参数，应用会自动回退到系统
+  默认 ALSA 设备。若默认设备不是 3.5mm 声卡（以 `aplay -l` 为准，如 rk809
+  是 card 1），二选一：
+  - 升级 ffmpeg（如安装新版静态构建或 backports）；
+  - 把默认 ALSA 设备指到 3.5mm 声卡（推荐，改完重启服务）：
+
+    ```bash
+    # ~/.asoundrc（注意 card 编号以 aplay -l 实机输出为准）
+    cat > ~/.asoundrc <<'EOF'
+    pcm.!default { type hw; card 1; device 0; }
+    ctl.!default { type hw; card 1; }
+    EOF
+    ```
 - 如果试播无声，检查音量：`alsamixer -c 1`（或
   `amixer -c 1 set Master 80%`），确认 rk809 的 Playback 通道未静音、音量
   足够；后续还要验收 3.5mm → A7670E 的上行音频链路（对端能否听到），见
@@ -157,7 +172,8 @@ chmod 600 .env   # 敏感文件，仅属主可读写
 | `MODEM_PORT` | A7670E 串口路径，默认为 `/dev/ttyUSB1`，按第 2 节核对。 |
 | `AUDIO_DEVICE` | 声卡设备，默认为 `plughw:1,0`，按第 3 节核对。 |
 | `DATABASE_URL` | SQLite 路径，默认 `sqlite:///./data/app.db`，一般不用改。 |
-| `TTS_PROVIDER` | 默认 `none`（离线不生成音频）；接入云 TTS 属 P2，不在本部署范围。 |
+| `TTS_PROVIDER` | 默认 `none`（离线不生成音频）；`edge` = Microsoft Edge 在线 TTS（免费、无需 API key，输出 24kHz mono MP3，需要能访问微软服务的网络）。 |
+| `TTS_VOICE` | edge 发音人，默认 `zh-CN-XiaoxiaoNeural`（如 `zh-CN-YunxiNeural`）。 |
 
 生成 `SESSION_SECRET`（不要手工编一个短字符串）：
 
@@ -261,7 +277,7 @@ sudo systemctl restart callback-demo-web
    ```
 
    期望事件（`docs/callback-demo-plan.md` 有完整日志样例）：`VOICE CALL:
-   BEGIN` → `aplay` exit=0 → `VOICE CALL: END` → `NO CARRIER`，串口干净释放。
+   BEGIN` → `ffplay` exit=0 → `VOICE CALL: END` → `NO CARRIER`，串口干净释放。
    **先决条件**：如果 Web 服务的 Worker 已开启，先到管理页关闭 Worker 运行时
    开关（或 `sudo systemctl stop callback-demo-web`），避免与 smoke test 抢
    串口。
@@ -282,18 +298,17 @@ sudo systemctl restart callback-demo-web
 
 - 日志：应用日志走标准输出（systemd 下用 `journalctl` 查看），日志内容对
   密钥和手机号做了打码（`app/logging.py`）。
-- 数据库与运行数据在 `data/`（`data/app.db`、`data/imports/`），属于运行时
-  数据，不提交 git。话术 WAV 的存放路径以话术记录的 `wav_path` 字段为准；
-  目录/命名规范属 TODO「P2：音频与部署」，当前 `TTS_PROVIDER=none` 不生成
-  音频。
-- 手动备份（自动化备份在 TODO「P1：备份与灾备」中，尚未实现）。备份前先停
-  服务，或用 SQLite 在线备份接口，不要直接复制正在写入的库文件：
+- 数据库与运行数据在 `data/`（`data/app.db`、`data/imports/`、`data/audio/`），
+  属于运行时数据，不提交 git。话术音频目录/命名/覆盖规范见 README「话术音频」；
+  `TTS_PROVIDER=none` 时不生成音频，`edge` 时生成 `data/audio/script-{id}-{hash}.mp3`。
+- 自动化备份已内置：Web 进程内定时线程按 `BACKUP_INTERVAL_HOURS` 执行，
+  SQLite backup API 一致性快照 + `data/imports/` + `data/audio/` 打包，可选
+  WebDAV 远端；配置见 `.env.example` 的 `BACKUP_*` 项，管理入口为「系统管理 →
+  备份管理」（也可手动触发/下载）。旧版手动命令保留备查：
 
   ```bash
   # 在线一致性备份（无需停服务）
   uv run python -c "import sqlite3; sqlite3.connect('data/app.db').backup(sqlite3.connect('/tmp/app-backup.db'))"
-  # 连同导入原始文件一起备份（话术 WAV 如有，按 wav_path 一并复制）
-  cp -r data/imports /tmp/backup-$(date +%F)/
   ```
 
 ## 10. 常见问题
@@ -304,7 +319,7 @@ sudo systemctl restart callback-demo-web
 | 启动报 `Database schema is not up to date` | 未执行迁移或代码已更新；`uv run alembic upgrade head` 后重启。 |
 | 串口 `Permission denied` | 用户不在 `dialout` 组（重新登录生效），或 udev 规则未生效；见第 2 节。 |
 | 串口节点不存在（`/dev/ttyUSB*` 为空） | 检查 USB 接线与 `dmesg | grep ttyUSB`；`MODEM_PORT` 与实际枚举不符时改 `.env`。 |
-| `aplay` 无声音或报设备错误 | `aplay -l` 核对 `AUDIO_DEVICE` 编号；`alsamixer -c <card>` 检查音量/静音；见第 3 节。 |
+| `ffplay` 无声音、报设备错误或找不到 | `ffplay --version` 确认 ffmpeg 已安装；`aplay -l` 核对 `AUDIO_DEVICE` 编号；ffmpeg < 6.0 不支持 `-audio_device` 时应用自动回退默认设备，建议升级 ffmpeg 或配置默认声卡；`alsamixer -c <card>` 检查音量/静音；见第 3 节。 |
 | 写 `data/` 报 PermissionError | 仓库目录属主与 systemd 的 `User=` 不一致；`sudo chown -R radxa:radxa /home/radxa/callback-demo`（路径示例）。 |
 | 任务一直 `queued` 不拨号 | Worker 两层开关未同时打开：`.env` 的 `CALL_WORKER_ENABLED` + 管理页运行时开关；见第 7 节。 |
 | 管理页显示 Worker「配置未开启」 | 硬开关为 `0`，属预期；确认硬件后再开启。 |

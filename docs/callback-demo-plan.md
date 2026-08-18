@@ -44,7 +44,7 @@
 
 1. 使用 `/dev/ttyUSB1` 发送 AT 指令拨打测试手机号。
 2. 对端接通电话。
-3. Rock Pi 使用 `aplay` 播放本地 WAV 文件。
+3. Rock Pi 使用 `ffplay` 播放本地音频文件（WAV/MP3 等）。
 4. 对端手机能稳定听到音频。
 
 如果该验收点不通过，优先排查音频接线、TRRS 引脚定义、声卡输出设备、音量和 A7670E 麦克风输入链路。
@@ -61,7 +61,7 @@
   每次结构变化都有可审查、可回滚的版本。
 - 调度器：APScheduler。
 - 串口控制：pyserial。
-- 音频播放：最简单方式，调用 `aplay` 播放本地 WAV。
+- 音频播放：使用 `ffplay`（ffmpeg 套件，必选依赖）播放本地音频。
 - 配置：`.env` + `.env.example`。
 
 ## Web 范围
@@ -308,7 +308,8 @@ NO CARRIER
 - 不在拨号时实时 TTS。
 - 不在通话过程中生成语音。
 - 不做 MP3 运行时转码。
-- `aplay` 播放设备通过配置指定，例如 `AUDIO_DEVICE=plughw:1,0`。
+- `ffplay` 播放设备通过配置指定，例如 `AUDIO_DEVICE=plughw:1,0`（ffmpeg
+  ≥ 6.0 支持 `-audio_device`，旧版回退系统默认设备）。
 
 音频生成策略：
 
@@ -507,7 +508,7 @@ DEFAULT_TIMEZONE=Asia/Shanghai
 
 ### 阶段 7：音频播放
 
-1. 用 `aplay` 播放 WAV。
+1. 用 `ffplay` 播放音频文件。
 2. 播放设备配置化。
 3. 记录音频播放开始和结束事件。
 4. 如果音频文件不存在，任务直接失败。
