@@ -70,6 +70,8 @@ class Script(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     tts_status: Mapped[str] = mapped_column(String(32), default="not_generated", nullable=False)
+    # 音频生成失败原因（成功或未生成时为空），供话术页展示失败状态详情。
+    tts_error: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     wav_path: Mapped[str] = mapped_column(String(500), default="", nullable=False)
 
     plans: Mapped[list["CallbackPlan"]] = relationship(back_populates="script")
