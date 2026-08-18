@@ -559,6 +559,10 @@ class User(TimestampMixin, Base):
     display_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_superadmin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 台账导入应用时按职责自动创建的账号；管理员可重置密码。
+    auto_provisioned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 首次登录必须修改初始随机密码。
+    force_password_change: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
