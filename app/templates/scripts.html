@@ -7,6 +7,7 @@
         <h2>{{ "编辑话术" if edit_script else "新增话术" }}</h2>
       </div>
       {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+      {% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
       <form class="stack" method="post" action="{{ '/scripts/' ~ edit_script.id ~ '/edit' if edit_script else '/scripts' }}">
         <label>
           标题
@@ -49,8 +50,14 @@
                 <span class="status-pill {{ script.tts_status }}">
                   {{ "已生成" if script.tts_status == "generated" else ("未生成" if script.tts_status == "not_generated" else "生成失败") }}
                 </span>
+                {% if script.tts_error %}<div class="status-detail">{{ script.tts_error }}</div>{% endif %}
               </td>
-              <td class="mono">{{ script.wav_path or "-" }}</td>
+              <td>
+                <div class="mono">{{ script.wav_path or "-" }}</div>
+                {% if script|script_audio_url %}
+                  <audio class="audio-preview" controls preload="none" src="{{ script|script_audio_url }}"></audio>
+                {% endif %}
+              </td>
               <td class="actions">
                 <a class="button secondary small" href="/scripts?edit_id={{ script.id }}">编辑</a>
                 <form method="post" action="/scripts/{{ script.id }}/generate-audio">

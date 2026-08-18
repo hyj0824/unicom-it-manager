@@ -53,3 +53,21 @@ uv run python scripts/hardware_smoke.py YOUR_TEST_PHONE /path/to/audio.wav
 
 The script dials through the configured A7670E serial port, waits for
 `VOICE CALL: BEGIN`, plays the WAV file with `aplay`, and prints the serial log.
+
+## 话术音频
+
+话术生成 WAV 的目录、命名、格式与覆盖策略（与 `app/audio.py` 的 docstring
+保持一致）：
+
+- 目录：`data/audio/`，备份任务把该目录整体打包进归档（`audio/`）。
+- 命名：`script-{话术id}-{话术正文sha1前12位}.wav`。正文不变时重复生成命中
+  同名文件（缓存），不重复调用 TTS；正文变化生成新文件，旧文件保留为历史
+  缓存。
+- 格式约定：8000 Hz / 16bit / mono，与测试音一致，可直接被 `aplay` 播放。
+- 覆盖策略：原子写（同目录临时文件 + `os.replace`），不会出现半截 WAV。
+- 状态：`tts_status` 为 `not_generated` / `generated` / `failed`，失败原因
+  写入 `tts_error`；话术页提供「生成音频」重试入口（结果以页面提示反馈）和
+  页面试听（`<audio>` 播放 `/audio/...`，仅限 `data/audio/` 下的 WAV，需登录、
+  防路径穿越）。
+- 离线默认 `TTS_PROVIDER=none` 不生成音频，此时点击「生成音频」会明确提示
+  失败原因；接入云 TTS 时应作为独立 provider 实现同一接口。

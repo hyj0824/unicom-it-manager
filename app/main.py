@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth
+from .audio import resolve_audio_file
 from .config import (
     BASE_DIR,
     ensure_storage_paths,
@@ -59,7 +60,11 @@ from .services.call_worker import call_worker_service, modem_availability
 from .services.backups import backup_service
 from .services.customers import customer_phone_map, referencing_counts as customer_referencing_counts
 from .services.dictionaries import active_items, resolve_or_create_item
-from .services.scripts import generate_script_audio, referencing_counts as script_referencing_counts
+from .services.scripts import (
+    generate_script_audio,
+    script_audio_url,
+    referencing_counts as script_referencing_counts,
+)
 from .services.settings import (
     SCHEDULER_ENABLED_KEY,
     CALL_WORKER_ENABLED_KEY,
@@ -199,6 +204,7 @@ templates.env.filters["datetime_local"] = datetime_local_filter
 templates.env.filters["from_json_map"] = from_json_map
 templates.env.filters["status_label"] = status_label
 templates.env.filters["domain_label"] = domain_label
+templates.env.filters["script_audio_url"] = script_audio_url
 
 
 @asynccontextmanager
@@ -1820,6 +1826,7 @@ def scripts_template(
     request: Request,
     db: Session,
     error: str = "",
+    notice: str = "",
     form_data: dict[str, str] | None = None,
     edit_script: Script | None = None,
     status_code: int = 200,
@@ -1834,6 +1841,7 @@ def scripts_template(
         edit_script=edit_script,
         form_data=form_data or {},
         error=error,
+        notice=notice,
     )
 
 
@@ -1841,11 +1849,12 @@ def scripts_template(
 def scripts_page(
     request: Request,
     edit_id: int | None = None,
+    notice: str = "",
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
     edit_script = db.get(Script, edit_id) if edit_id else None
-    return scripts_template(request, db, edit_script=edit_script)
+    return scripts_template(request, db, edit_script=edit_script, notice=notice)
 
 
 @app.post("/scripts")
@@ -1858,7 +1867,15 @@ async def script_create(request: Request, db: Session = Depends(get_db)):
     form_data = {"title": title, "body": body, "wav_path": wav_path}
     if not title or not body:
         return scripts_template(request, db, "标题和话术内容必填。", form_data, status_code=400)
-    db.add(Script(title=title, body=body, wav_path=wav_path))
+    # 手动指定 WAV 时视为已有可用音频；否则待生成。
+    db.add(
+        Script(
+            title=title,
+            body=body,
+            wav_path=wav_path,
+            tts_status="generated" if wav_path else "not_generated",
+        )
+    )
     db.commit()
     return redirect_to("/scripts")
 
@@ -1876,7 +1893,9 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
     script.title = title
     script.body = body
     script.wav_path = wav_path
-    script.tts_status = "generated" if wav_path else script.tts_status
+    if wav_path:
+        script.tts_status = "generated"
+        script.tts_error = ""
     db.commit()
     return redirect_to("/scripts")
 
@@ -1915,9 +1934,19 @@ def script_delete(script_id: int, request: Request, db: Session = Depends(get_db
 def script_generate_audio(script_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
     script = get_or_404(db, Script, script_id)
-    generate_script_audio(db, script, settings)
+    message = generate_script_audio(db, script, settings)
     db.commit()
-    return redirect_to("/scripts")
+    return redirect_to(f"/scripts?notice={quote(message)}")
+
+
+@app.get("/audio/{filename:path}")
+def script_audio_file(filename: str, request: Request):
+    """只读话术音频：仅服务 data/audio/ 下的 .wav，需登录，防路径穿越。"""
+    auth.require_login(request)
+    path = resolve_audio_file(filename)
+    if path is None:
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="audio/wav")
 
 
 # ---------------------------------------------------------------- 回访计划

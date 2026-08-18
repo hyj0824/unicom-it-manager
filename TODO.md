@@ -130,8 +130,12 @@
 ## P2：音频与部署
 
 - [ ] 接入一个真实 TTS Provider，并保留 `TTS_PROVIDER=none` 作为离线默认值。
-- [ ] 规范生成 WAV 的目录、命名、采样率、声道和缓存/覆盖策略。
-- [ ] 增加音频生成失败状态、重试入口和页面试听能力。
+- [x] 规范生成 WAV 的目录、命名、采样率、声道和缓存/覆盖策略（`data/audio/`，
+  `script-{id}-{正文sha1前12位}.wav`，8kHz/16bit/mono，原子写覆盖，见
+  app/audio.py 与 README「话术音频」）。
+- [x] 增加音频生成失败状态（`tts_error` 记录原因）、重新生成入口与结果反馈，
+  以及页面试听（登录后可读 `/audio/...` 只读路由，限 `data/audio/` 内 WAV，
+  防路径穿越）。
 - [ ] 编写 Rock Pi 3A 部署文档，包括串口权限、声卡选择、`uv sync` 和服务启动。
 - [ ] 提供 systemd 服务示例，区分 Web/Scheduler 与硬件 Worker 的启动开关。
 
