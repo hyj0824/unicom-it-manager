@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block page_title %}维系与回收工作台{% endblock %}
+{% block content %}
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  {% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>到期维系业务（提前 {{ lead_days }} 天）</h2>
+      <span class="subtle">协议到期日在今天起 {{ lead_days }} 天内的业务。提交的续签 / 退网申请进入<a class="text-link" href="/reviews">审核中心</a>，审核应用后不再重复通知。</span>
+    </div>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>业务号码</th><th>客户</th><th>协议到期日</th><th>客户经理</th>
+          <th>今日通知</th><th>最近申请</th><th class="actions-col">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in due_rows %}
+          <tr>
+            <td class="mono">{{ row.service.service_number }}</td>
+            <td>{{ row.service.customer.name }}</td>
+            <td>{{ row.expires_label }}</td>
+            <td>{{ row.account_manager or "-" }}</td>
+            <td>
+              {% if row.notified_today %}
+                <span class="status-pill ok">已通知</span>
+              {% else %}
+                <span class="status-pill muted">未通知</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.latest_change %}
+                <a class="text-link" href="/reviews/{{ row.latest_change[1] }}"><span class="status-pill {{ 'ok' if row.latest_change[0] in ['approved', 'applied'] else 'muted' }}">{{ row.latest_change[0]|status_label }}</span></a>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td class="actions">
+              <details class="row-form">
+                <summary class="button secondary small">续签申请</summary>
+                <form class="row-form-body" method="post" action="/due-work/business/{{ row.service.id }}/renew">
+                  <label>新协议到期日<input type="date" name="agreement_expires_at" min="{{ min_date }}" required></label>
+                  <label>申请理由<input name="reason" required placeholder="例如：客户已确认续签一年"></label>
+                  <button class="button primary small" type="submit">提交续签申请</button>
+                </form>
+              </details>
+              <details class="row-form">
+                <summary class="button danger small">退网申请</summary>
+                <form class="row-form-body" method="post" action="/due-work/business/{{ row.service.id }}/retire" data-confirm="确认提交退网申请？审核应用后该业务服务状态将改为「主动退网(申请拆机)」，其设备将进入回收提醒。">
+                  <label>申请理由<input name="reason" required placeholder="例如：客户确认不续签，申请拆机"></label>
+                  <button class="button danger small" type="submit">提交退网申请</button>
+                </form>
+              </details>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="empty">当前到期窗口内没有待维系的业务。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>退网未回收设备</h2>
+      <span class="subtle">服务状态含「退网」或协议已过期，且回收状态为空或未回收的设备。提交的回收申请进入<a class="text-link" href="/reviews">审核中心</a>，审核应用后不再重复提醒。</span>
+    </div>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>设备编码</th><th>业务号码</th><th>客户</th><th>网络维护责任人</th>
+          <th class="actions-col">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in device_rows %}
+          <tr>
+            <td class="mono">{{ row.device.device_code }}</td>
+            <td class="mono">{{ row.service.service_number }}</td>
+            <td>{{ row.service.customer.name }}</td>
+            <td>{{ row.maintenance_name or "-" }}</td>
+            <td class="actions">
+              <details class="row-form">
+                <summary class="button primary small">回收完成申请</summary>
+                <form class="row-form-body" method="post" action="/due-work/device/{{ row.device.id }}/recover" data-confirm="确认提交回收申请？审核应用后该设备回收状态将改为「已回收」。">
+                  <label>申请理由<input name="reason" required placeholder="例如：设备已回收入库"></label>
+                  <button class="button primary small" type="submit">提交回收申请</button>
+                </form>
+              </details>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="empty">暂无退网未回收设备。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+{% endblock %}

@@ -1038,3 +1038,32 @@ textarea {
   align-items: center;
   justify-content: flex-end;
 }
+
+/* 维系与回收工作台：表格行内展开的申请表单。 */
+.row-form {
+  display: inline-block;
+  position: relative;
+}
+
+.row-form summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.row-form summary::-webkit-details-marker {
+  display: none;
+}
+
+.row-form-body {
+  display: grid;
+  gap: 8px;
+  position: absolute;
+  right: 0;
+  z-index: 10;
+  min-width: 260px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}

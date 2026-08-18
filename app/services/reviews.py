@@ -224,7 +224,7 @@ def build_import_change_set(db: Session, batch: ImportBatch, user_id: int | None
 
 def preview_change_item(db: Session, item: ChangeItem) -> dict:
     payload = _json(item.patch_json)
-    if item.entity_type == "network_device":
+    if item.entity_type.replace("_", "").lower() == "networkdevice":
         data = payload.get("device", {})
         device = db.get(NetworkDevice, item.entity_id) if item.entity_id else None
         current = {} if device is None else {
@@ -285,9 +285,15 @@ def _apply_business(db: Session, item: ChangeItem) -> tuple[BusinessService, dic
     service.customer_id = customer.id
     service.county_item_id = _item_id(db, "county", payload.get("county", "")); service.grid_item_id = _item_id(db, "grid", payload.get("grid", ""))
     service.service_status_item_id = _item_id(db, "service_status", payload.get("service_status", "")); service.business_type_item_id = _item_id(db, "business_type", payload.get("business_type", ""))
-    service.data_quality_status_item_id = _item_id(db, "data_quality_status", "缺项" if payload.get("row_status") == "missing" else "完整")
+    # 数据质量与来源行只在导入 patch 显式提供时改写：人工变更申请
+    # （change_requests）的完整快照携带 row_status 保持当前值，不带 batch_id
+    # 时保留原 source_row，避免整体覆盖把来源行抹成导入批次占位文本。
+    if "row_status" in payload:
+        service.data_quality_status_item_id = _item_id(db, "data_quality_status", "缺项" if payload.get("row_status") == "missing" else "完整")
     service.channel_name = payload.get("channel_name", ""); service.accessed_at = _local_date(payload.get("accessed_at", "")); service.agreement_expires_at = _local_date(payload.get("agreement_expires_at", ""))
-    service.source_row = f"导入批次 #{payload.get('batch_id', '')} 第 {'、'.join(map(str, payload.get('row_numbers', [])))} 行"; service.is_active = True
+    if payload.get("batch_id") is not None:
+        service.source_row = f"导入批次 #{payload.get('batch_id', '')} 第 {'、'.join(map(str, payload.get('row_numbers', [])))} 行"
+    service.is_active = True
     if item.operation == "update": service.version += 1
     _sync_contacts(db, customer, payload)
     return service, payload
@@ -365,7 +371,7 @@ def apply_change_set(db: Session, change_set: ChangeSet, user_id: int | None) ->
     if not change_set.items: raise ChangeApplicationError("变更申请没有可应用的条目。")
     applied = 0
     for item in change_set.items:
-        entity, payload = _apply_device(db, item) if item.entity_type == "network_device" else _apply_business(db, item)
+        entity, payload = _apply_device(db, item) if item.entity_type.replace("_", "").lower() == "networkdevice" else _apply_business(db, item)
         for staging_id in payload.get("staging_row_ids", []):
             row = db.get(StagingRow, staging_id)
             if row: row.result_entity_type = item.entity_type; row.result_entity_id = entity.id
