@@ -115,6 +115,8 @@ class ScanSchedule(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     # due_renewal=协议到期维系；device_recycle=退网设备回收。
     scan_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # 话术模板：正文支持 {{客户名称}} 等占位符；为空时使用内置默认模板。
+    script_id: Mapped[int | None] = mapped_column(ForeignKey("scripts.id"))
     cron_expr: Mapped[str] = mapped_column(
         String(120), default="0 9 * * *", nullable=False
     )
@@ -127,6 +129,7 @@ class ScanSchedule(TimestampMixin, Base):
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
+    script: Mapped[Script | None] = relationship()
     tasks: Mapped[list["CallTask"]] = relationship(back_populates="scan_schedule")
 
 
