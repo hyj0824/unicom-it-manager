@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block page_title %}备份与灾备{% endblock %}
+{% block content %}
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  {% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+  <section class="panel">
+    <div class="panel-head">
+      <div><h2>备份状态</h2><p class="subtle">数据库使用 SQLite 一致性快照，备份包不包含环境变量和凭据。</p></div>
+      <form method="post" action="/admin/backups">
+        <button class="button primary" type="submit">立即创建备份</button>
+      </form>
+    </div>
+    <div class="summary-grid">
+      <div><span>定期任务</span><strong>{{ '运行中' if backup_status.enabled else '已关闭' }}</strong></div>
+      <div><span>最近成功</span><strong>{{ backup_status.last_success_at or '-' }}</strong></div>
+      <div><span>最近失败</span><strong>{{ backup_status.last_failure or '-' }}</strong></div>
+      <div><span>远端状态</span><strong>{{ backup_status.remote_state }}</strong></div>
+      <div><span>最近远端成功</span><strong>{{ backup_status.remote_last_success_at or '-' }}</strong></div>
+      <div><span>远端错误</span><strong>{{ backup_status.remote_last_error or '-' }}</strong></div>
+      <div><span>备份目录</span><strong class="mono">{{ backup_status.directory }}</strong></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>本地备份历史</h2><span class="subtle">保留 {{ backup_status.retention_days }} 天</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>文件</th><th>创建时间</th><th>大小</th><th>完整性</th><th>操作</th></tr></thead>
+        <tbody>
+          {% for backup in backups %}
+            <tr>
+              <td class="mono">{{ backup.filename }}</td>
+              <td>{{ backup.created_at or '-' }}</td>
+              <td>{{ "%.1f"|format(backup.size / 1024) }} KiB</td>
+              <td><span class="status-pill {{ 'ok' if backup.valid else 'error' }}">{{ '通过' if backup.valid else '损坏' }}</span></td>
+              <td>{% if backup.valid %}<a class="text-link" href="/admin/backups/{{ backup.filename }}/download">下载</a>{% else %}-{% endif %}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="empty">暂无本地备份。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

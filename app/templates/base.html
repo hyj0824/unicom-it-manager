@@ -37,6 +37,7 @@
           <details class="nav-section" {% if path.startswith('/admin') %}open{% endif %}>
             <summary>系统管理</summary>
             <a class="{% if path.startswith('/admin/system') %}active{% endif %}" href="/admin/system">系统监控</a>
+            <a class="{% if path.startswith('/admin/backups') %}active{% endif %}" href="/admin/backups">备份与灾备</a>
             <a class="{% if path.startswith('/admin/users') %}active{% endif %}" href="/admin/users">用户管理</a>
             <a class="{% if path.startswith('/admin/roles') %}active{% endif %}" href="/admin/roles">角色权限</a>
           </details>
