@@ -450,7 +450,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/settings/scheduler")
 async def scheduler_toggle(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_config", "system")
     form = await request.form()
     enabled = str(form.get("enabled", "0")) == "1"
     set_setting(db, SCHEDULER_ENABLED_KEY, "1" if enabled else "0")
@@ -460,7 +460,7 @@ async def scheduler_toggle(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/settings/worker")
 async def worker_toggle(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_config", "system")
     form = await request.form()
     enabled = str(form.get("enabled", "0")) == "1"
     call_worker_service.set_enabled(db, enabled)
@@ -1173,6 +1173,7 @@ def import_detail(
     row_query: str = "",
     edit_row_id: int | None = None,
     error: str = "",
+    status_code: int = 200,
     db: Session = Depends(get_db),
 ):
     auth.require_permission(db, request, "import", "system")
@@ -1235,6 +1236,7 @@ def import_detail(
         request,
         "import_detail.html",
         db,
+        status_code=status_code,
         batch=batch,
         rows=rows,
         status_filter=status_filter,
@@ -1283,7 +1285,7 @@ def import_submit(batch_id: int, request: Request, db: Session = Depends(get_db)
         db.commit()
     except review_service.ChangeApplicationError as exc:
         db.rollback()
-        return import_detail(batch_id, request, error=str(exc), db=db)
+        return import_detail(batch_id, request, error=str(exc), status_code=409, db=db)
     return redirect_to(f"/reviews/{change_sets[0].id}")
 
 
@@ -1530,13 +1532,13 @@ def _backups_template(
 
 @app.get("/admin/backups")
 def admin_backups_page(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_config", "system")
     return _backups_template(request, db)
 
 
 @app.post("/admin/backups")
 def admin_backup_create(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_config", "system")
     try:
         info = backup_service.create_backup()
     except Exception as exc:  # noqa: BLE001 - display operational failure to admin
@@ -1559,7 +1561,7 @@ def admin_backup_create(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/admin/backups/{filename}/download")
 def admin_backup_download(filename: str, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_config", "system")
     path = backup_service.backup_directory / filename
     if (
         Path(filename).name != filename
@@ -1582,7 +1584,7 @@ def admin_backup_download(filename: str, request: Request, db: Session = Depends
 
 @app.get("/admin/users")
 def admin_users_page(request: Request, edit_id: int | None = None, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_users", "system")
     users = db.scalars(select(User).order_by(User.created_at.asc())).all()
     roles = db.scalars(select(Role).order_by(Role.id.asc())).all()
     user_role_map = {
@@ -1605,7 +1607,7 @@ def admin_users_page(request: Request, edit_id: int | None = None, db: Session =
 
 @app.post("/admin/users")
 async def admin_user_create(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_users", "system")
     form = await request.form()
     username = str(form.get("username", "")).strip()
     display_name = str(form.get("display_name", "")).strip()
@@ -1646,7 +1648,7 @@ async def admin_user_create(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/admin/users/{user_id}/edit")
 async def admin_user_update(user_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_users", "system")
     user = get_or_404(db, User, user_id)
     form = await request.form()
     user.display_name = str(form.get("display_name", "")).strip()
@@ -1665,7 +1667,7 @@ async def admin_user_update(user_id: int, request: Request, db: Session = Depend
 
 @app.post("/admin/users/{user_id}/password")
 async def admin_user_password(user_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_users", "system")
     user = get_or_404(db, User, user_id)
     form = await request.form()
     password = str(form.get("password", ""))
@@ -1683,7 +1685,7 @@ async def admin_user_password(user_id: int, request: Request, db: Session = Depe
 
 @app.get("/admin/roles")
 def admin_roles_page(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "manage_users", "system")
     roles = db.scalars(select(Role).order_by(Role.id.asc())).all()
     permissions = db.scalars(
         select(RolePermission).order_by(RolePermission.role_id.asc(), RolePermission.domain.asc())
@@ -1747,12 +1749,15 @@ def admin_system_page(
     event_type: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
     tab = tab if tab in SYSTEM_TABS else "status"
+    auth.require_permission(
+        db, request, "read" if tab == "logs" else "manage_config", "system"
+    )
 
     if tab == "status":
         scripts = db.scalars(select(Script)).all()
         scripts_with_wav = sum(1 for s in scripts if s.wav_path and Path(s.wav_path).exists())
+        worker_status = call_worker_service.status()
         queue_counts = {
             name: db.scalar(select(func.count(CallTask.id)).where(CallTask.status == name)) or 0
             for name in ["queued", "dialing"]
@@ -1767,9 +1772,10 @@ def admin_system_page(
             tab=tab,
             scheduler_status=scheduler_service.status(),
             scheduler_enabled=is_scheduler_enabled(db),
-            worker_status=call_worker_service.status(),
+            worker_status=worker_status,
             worker_enabled=is_worker_enabled(db),
             worker_gate=settings.call_worker_enabled,
+            modem_status=modem_availability(settings, worker_status),
             queue_counts=queue_counts,
             scripts_total=len(scripts),
             scripts_with_wav=scripts_with_wav,
