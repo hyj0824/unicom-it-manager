@@ -1,0 +1,56 @@
+# callback-demo-web.service —— Rock Pi 3A 电话回访 Demo 的 systemd 服务示例
+#
+# 架构说明（详见 docs/deploy-rockpi.md、docs/migration-plan.md）：
+# - Web、Scheduler（APScheduler）与 Call Worker 都在同一个 uvicorn 进程内
+#   （app/main.py lifespan），因此只需要一个服务单元，不存在独立的
+#   Worker 进程或单元。
+# - 硬件 Worker 由 .env 的 CALL_WORKER_ENABLED 硬开关控制（默认 0，确认
+#   硬件后才开启），管理页「系统监控 → 组件状态」的运行时开关再控制其
+#   实际工作状态；两层都打开时 Worker 才会拨号。
+# - SQLite 单写者约束：不要给 uvicorn 加 --workers N，也不要启动第二个
+#   服务实例，避免并发写库或重复拨号。
+# - 备份/定期任务尚未实现（TODO「P1：备份与灾备」）；未来若在 Web 进程
+#   内实现，会随本单元运行，无需新增单元。
+#
+# 安装前必须替换以下示例值（★ = 必改）：
+#   ★ User=radxa                     -> 运行用户（需在 dialout 组，见部署文档第 2 节）
+#   ★ WorkingDirectory=              -> 仓库实际路径
+#   ★ EnvironmentFile=               -> 仓库内 .env 的实际路径
+#   ★ ExecStart 中 uv 的绝对路径      -> `which uv` 的输出（示例 /home/radxa/.local/bin/uv）
+#   ReadWritePaths=                  -> 同步改为仓库 data/ 目录
+#
+# 安装与启用：
+#   sudo cp scripts/systemd/callback-demo-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now callback-demo-web
+#
+# 日志：
+#   journalctl -u callback-demo-web -f
+
+[Unit]
+Description=Callback demo web + scheduler (+ call worker when CALL_WORKER_ENABLED=1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radxa
+WorkingDirectory=/home/radxa/callback-demo
+# .env 由应用自身也会加载（app/config.py）；EnvironmentFile 使其在服务环境
+# 中显式可见。`-` 前缀表示文件缺失时忽略，不导致启动失败。
+EnvironmentFile=-/home/radxa/callback-demo/.env
+# --no-sync：启动不做隐式依赖同步，代码更新后人工执行 `uv sync`（见部署文档
+# 第 9 节）；如需启动时自动同步可去掉该参数（要求能访问依赖源）。
+ExecStart=/home/radxa/.local/bin/uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+
+# 基础加固；如遇串口/音频等异常且怀疑与加固有关，可先注释掉这些行排查。
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+# 运行数据目录（SQLite 库、导入文件、话术音频）显式可写。
+ReadWritePaths=/home/radxa/callback-demo/data
+
+[Install]
+WantedBy=multi-user.target

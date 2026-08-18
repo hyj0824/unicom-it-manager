@@ -25,6 +25,26 @@ The web app refuses to start when `ADMIN_PASSWORD` is blank or left as
 Schema changes are made through `alembic` migrations; the app never mutates
 the schema itself.
 
+## 部署（Rock Pi 3A）
+
+完整的 Rock Pi 3A 部署手册（串口权限、声卡选择、`uv sync`、`.env` 强密码
+说明、`alembic upgrade head`、systemd 安装启用、验证步骤）见
+[`docs/deploy-rockpi.md`](docs/deploy-rockpi.md)。
+
+systemd 服务示例位于 [`scripts/systemd/`](scripts/systemd/)：
+
+```bash
+sudo cp scripts/systemd/callback-demo-web.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now callback-demo-web
+journalctl -u callback-demo-web -f   # 查看日志
+```
+
+说明：Web 与调度器共用一个 uvicorn 进程；外呼 Worker 是同一进程内的线程，
+由 `.env` 的 `CALL_WORKER_ENABLED` 硬开关（默认 `0`）控制是否启动，管理页
+运行时开关再控制其实际工作状态。不要给 uvicorn 加 `--workers N`，也不要
+启动第二个服务实例（SQLite 单写者约束）。
+
 ## Hardware smoke test
 
 ```bash
