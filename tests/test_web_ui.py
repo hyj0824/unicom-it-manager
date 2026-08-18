@@ -111,6 +111,7 @@ def make_scan_schedule(
     timezone_name: str = "Asia/Shanghai",
     script: Script | None = None,
     enabled: bool = True,
+    sms_enabled: bool = False,
 ) -> ScanSchedule:
     with SessionLocal() as session:
         schedule = ScanSchedule(
@@ -121,6 +122,7 @@ def make_scan_schedule(
             timezone=timezone_name,
             lead_days=14,
             enabled=enabled,
+            sms_enabled=sms_enabled,
         )
         session.add(schedule)
         session.commit()
@@ -156,7 +158,7 @@ def make_task_record(
 
 
 def test_login_required_redirects(client: TestClient) -> None:
-    for path in ["/", "/calls", "/scan-schedules", "/contacts", "/scripts", "/admin/system"]:
+    for path in ["/", "/calls", "/scan-schedules", "/contacts", "/scripts", "/admin/system", "/sms"]:
         resp = client.get(path, follow_redirects=False)
         assert resp.status_code == 303, path
         assert resp.headers["location"] == "/login", path
@@ -179,6 +181,7 @@ def _scan_schedule_data(
     timezone_name: str = "Asia/Shanghai",
     lead_days: str = "14",
     enabled: bool = True,
+    sms_enabled: bool = False,
 ) -> dict:
     data = {
         "name": name,
@@ -190,6 +193,8 @@ def _scan_schedule_data(
     }
     if enabled:
         data["enabled"] = "on"
+    if sms_enabled:
+        data["sms_enabled"] = "on"
     return data
 
 
@@ -358,7 +363,7 @@ def test_scan_schedule_create_valid_shows_in_list(client: TestClient) -> None:
     script = make_script()
     resp = client.post(
         "/scan-schedules",
-        data=_scan_schedule_data(script, name="设备回收扫描", scan_type="device_recycle"),
+        data=_scan_schedule_data(script, name="设备回收扫描", scan_type="device_recycle", sms_enabled=True),
         follow_redirects=False,
     )
     assert resp.status_code == 303
@@ -375,6 +380,7 @@ def test_scan_schedule_create_valid_shows_in_list(client: TestClient) -> None:
         assert schedule.timezone == "Asia/Shanghai"
         assert schedule.lead_days == 14
         assert schedule.enabled is True
+        assert schedule.sms_enabled is True
 
 
 def test_scan_schedule_edit_updates_fields(client: TestClient) -> None:
@@ -404,6 +410,30 @@ def test_scan_schedule_edit_updates_fields(client: TestClient) -> None:
         assert updated.timezone == "UTC"
         assert updated.lead_days == 7
         assert updated.enabled is False
+        assert updated.sms_enabled is False
+
+
+def test_scan_schedule_sms_toggle_via_edit(client: TestClient) -> None:
+    login(client)
+    schedule = make_scan_schedule(sms_enabled=True)
+    resp = client.post(
+        f"/scan-schedules/{schedule.id}/edit",
+        data=_scan_schedule_data(sms_enabled=True),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    with SessionLocal() as session:
+        assert session.get(ScanSchedule, schedule.id).sms_enabled is True
+
+    # 取消勾选（不提交 sms_enabled）即关闭。
+    resp = client.post(
+        f"/scan-schedules/{schedule.id}/edit",
+        data=_scan_schedule_data(sms_enabled=False),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    with SessionLocal() as session:
+        assert session.get(ScanSchedule, schedule.id).sms_enabled is False
 
 
 def test_scan_schedule_edit_rejects_invalid_cron(client: TestClient) -> None:
@@ -736,6 +766,7 @@ def test_nav_section_open_on_contacts_page(client: TestClient) -> None:
         ("/scan-schedules", True),
         ("/scripts", True),
         ("/calls", True),
+        ("/sms", True),
         ("/ledger", False),
         ("/", False),
     ]:

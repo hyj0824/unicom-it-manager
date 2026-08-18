@@ -40,6 +40,13 @@ class ModemClient:
         self._serial.write(data)
         self._serial.flush()
 
+    def write_bytes(self, data: bytes) -> None:
+        """原样写入字节（不追加回车），用于短信报文 + Ctrl+Z 等场景。"""
+        if self._serial is None:
+            raise RuntimeError("Modem serial port is not open")
+        self._serial.write(data)
+        self._serial.flush()
+
     def dial(self, phone: str) -> None:
         self.send_command(f"ATD{phone};")
 

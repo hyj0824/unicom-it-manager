@@ -13,6 +13,7 @@
       {% set selected_timezone = form_data.get('timezone', edit_schedule.timezone if edit_schedule else settings.default_timezone) %}
       {% set selected_lead_days = form_data.get('lead_days', edit_schedule.lead_days if edit_schedule else 14) %}
       {% set enabled_checked = (form_data and form_data.get('enabled') == 'on') or ((not form_data) and (not edit_schedule or edit_schedule.enabled)) %}
+      {% set sms_checked = (form_data and form_data.get('sms_enabled') == 'on') or ((not form_data) and (edit_schedule and edit_schedule.sms_enabled)) %}
       <form class="stack" method="post" action="{{ '/scan-schedules/' ~ edit_schedule.id ~ '/edit' if edit_schedule else '/scan-schedules' }}">
         <label>
           配置名称
@@ -54,6 +55,11 @@
           <input type="checkbox" name="enabled" {% if enabled_checked %}checked{% endif %}>
           启用
         </label>
+        <label class="check">
+          <input type="checkbox" name="sms_enabled" {% if sms_checked %}checked{% endif %}>
+          同步短信通知
+          <span class="subtle">生成语音通知任务时同步入队短信，由 Worker 空闲时发送（需 .env 设置 SMS_ENABLED=1）。</span>
+        </label>
         <div class="button-row">
           <button class="button primary" type="submit">{{ "保存修改" if edit_schedule else "创建配置" }}</button>
           {% if edit_schedule %}<a class="button ghost" href="/scan-schedules">取消</a>{% endif %}
@@ -75,6 +81,7 @@
             <th>执行时段</th>
             <th>提前天数</th>
             <th>状态</th>
+            <th>短信</th>
             <th>上次运行 / 错误</th>
             <th class="actions-col">操作</th>
           </tr>
@@ -88,6 +95,7 @@
               <td><span class="mono">{{ schedule.cron_expr }}</span><span class="subtle">（{{ schedule.timezone }}）</span></td>
               <td>{{ schedule.lead_days }} 天</td>
               <td><span class="status-pill {{ 'ok' if schedule.enabled else 'muted' }}">{{ "启用" if schedule.enabled else "停用" }}</span></td>
+              <td><span class="status-pill {{ 'ok' if schedule.sms_enabled else 'muted' }}">{{ "同步" if schedule.sms_enabled else "关闭" }}</span></td>
               <td>
                 <div class="mono">{{ schedule.last_run_at|dt(schedule.timezone) if schedule.last_run_at else "-" }}</div>
                 {% if schedule.last_error %}<div class="status-detail error">{{ schedule.last_error }}</div>{% endif %}
@@ -103,7 +111,7 @@
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="8" class="empty">暂无扫描配置。</td></tr>
+            <tr><td colspan="9" class="empty">暂无扫描配置。</td></tr>
           {% endfor %}
         </tbody>
       </table>
