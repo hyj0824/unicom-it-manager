@@ -38,8 +38,9 @@
       </div>
       {% if not worker_gate %}
         <div class="alert warning">
-          <strong>CALL_WORKER_ENABLED</strong> 未在 <code>.env</code> 中开启，Worker 进程不会启动；
-          即使下方开关为启用状态也不会拨号。确认硬件链路后再开启配置并重启服务。
+          <strong>配置未开启：</strong><code>CALL_WORKER_ENABLED</code> 当前为关闭，Worker 进程不会启动；
+          即使下方开关为启用状态也不会拨号。确认串口、音频和测试号码等硬件链路后，
+          在 <code>.env</code> 设置 <code>CALL_WORKER_ENABLED=1</code> 并重启 Web 服务；开启后会处理队列中的真实外呼任务。
         </div>
       {% endif %}
       <div class="summary-grid">
@@ -70,7 +71,13 @@
         <tbody>
           <tr>
             <td>A7670E 串口</td>
-            <td class="mono">{{ settings.modem_port }} @ {{ settings.modem_baud }}</td>
+            <td>
+              <span class="status-pill {{ 'ok' if modem_status.level == 'ok' else ('error' if modem_status.level == 'fail' else 'warning') }}">
+                {{ '节点可用' if modem_status.level == 'ok' else ('不可用' if modem_status.level == 'fail' else '待确认') }}
+              </span>
+              <span class="mono">{{ settings.modem_port }} @ {{ settings.modem_baud }}</span>
+              <span class="subtle">{{ modem_status.reason }}</span>
+            </td>
           </tr>
           <tr>
             <td>音频输出</td>

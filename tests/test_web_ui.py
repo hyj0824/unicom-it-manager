@@ -543,6 +543,13 @@ def test_dashboard_shows_worker_serial_and_current_call(client: TestClient) -> N
     assert "当前通话" in resp.text
     assert "空闲" in resp.text  # worker_status.working = False
 
+    system = client.get("/admin/system")
+    assert system.status_code == 200
+    assert "配置未开启" in system.text
+    assert "CALL_WORKER_ENABLED=1" in system.text
+    assert "A7670E 串口" in system.text
+    assert "不可用" in system.text or "待确认" in system.text
+
 
 # ---------------------------------------------------------------- 高影响操作确认
 

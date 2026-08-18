@@ -20,9 +20,21 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import get_db
 from app.main import app
-from app.models import CallTask, CallbackPlan, Contact, Customer, Script
+from app.models import (
+    CallTask,
+    CallbackPlan,
+    Contact,
+    Customer,
+    Permission,
+    Role,
+    RolePermission,
+    Script,
+    User,
+    UserRole,
+)
 from app.services import plans as plan_service
 from app.services.settings import is_scheduler_enabled
+from app.services.users import hash_password
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 UTC = timezone.utc
@@ -66,6 +78,91 @@ def login(client: TestClient) -> None:
         follow_redirects=False,
     )
     assert resp.status_code == 303, resp.text
+
+
+def test_admin_pages_require_system_permissions(client: TestClient, webdb) -> None:
+    with webdb() as db:
+        user = User(
+            username="business-maintainer",
+            display_name="业务维护人",
+            password_hash=hash_password("business-password"),
+            is_enabled=True,
+        )
+        db.add(user)
+        db.flush()
+        role = db.scalar(select(Role).where(Role.code == "business_maintainer"))
+        assert role is not None
+        db.add(UserRole(user_id=user.id, role_id=role.id))
+        db.commit()
+        user_id = user.id
+
+    response = client.post(
+        "/login",
+        data={"username": "business-maintainer", "password": "business-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    for path in [
+        "/admin/system",
+        "/admin/system?tab=logs",
+        "/admin/system?tab=settings",
+        "/admin/users",
+        "/admin/roles",
+        "/admin/backups",
+    ]:
+        response = client.get(path)
+        assert response.status_code == 403, path
+        assert "没有此操作权限" in response.text
+        assert "系统监控" not in response.text
+
+    for path in [
+        "/settings/worker",
+        "/settings/scheduler",
+        "/admin/backups",
+        "/admin/users",
+        f"/admin/users/{user_id}/edit",
+        f"/admin/users/{user_id}/password",
+    ]:
+        response = client.post(path, data={"enabled": "1"}, follow_redirects=False)
+        assert response.status_code == 403, path
+    response = client.get("/admin/backups/not-a-backup.zip/download")
+    assert response.status_code == 403
+
+
+def test_system_read_permission_only_allows_monitor_logs(client: TestClient, webdb) -> None:
+    with webdb() as db:
+        permission = db.scalar(select(Permission).where(Permission.code == "read"))
+        assert permission is not None
+        role = Role(code="system_observer", name="系统观察员", description="只读监控日志")
+        user = User(
+            username="system-observer",
+            display_name="系统观察员",
+            password_hash=hash_password("observer-password"),
+            is_enabled=True,
+        )
+        db.add_all([role, user])
+        db.flush()
+        db.add_all(
+            [
+                RolePermission(
+                    role_id=role.id, permission_id=permission.id, domain="system"
+                ),
+                UserRole(user_id=user.id, role_id=role.id),
+            ]
+        )
+        db.commit()
+
+    response = client.post(
+        "/login",
+        data={"username": "system-observer", "password": "observer-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert client.get("/admin/system?tab=logs").status_code == 200
+    assert client.get("/admin/system").status_code == 403
+    assert client.get("/admin/system?tab=settings").status_code == 403
+    assert client.get("/admin/users").status_code == 403
 
 
 def seed_basics(client: TestClient, webdb, name: str) -> dict[str, int]:

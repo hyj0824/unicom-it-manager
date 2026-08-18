@@ -352,6 +352,9 @@ def _apply_device(db: Session, item: ChangeItem) -> tuple[NetworkDevice, dict]:
 def _refresh_batch_status(db: Session, batch_id: int, change_set_id: int, user_id: int | None) -> None:
     batch = db.get(ImportBatch, batch_id)
     if batch is None: return
+    # SessionLocal disables autoflush; persist the current set's new status before
+    # checking whether any sibling domain still needs to be applied.
+    db.flush()
     pending = db.scalar(select(ChangeSet.id).where(ChangeSet.import_batch_id == batch_id, ChangeSet.status != "applied"))
     if pending is None:
         batch.status = "applied"; batch.reviewed_by_user_id = user_id; batch.applied_change_set_id = change_set_id
