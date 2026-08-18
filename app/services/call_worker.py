@@ -393,6 +393,7 @@ class CallWorkerService:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._recovery_done = False
         self._status: dict[str, object] = {
             "running": False,
             "working": False,
@@ -416,6 +417,7 @@ class CallWorkerService:
         if self._thread is not None and self._thread.is_alive():
             return True
         self._stop.clear()
+        self._recovery_done = False
         self._thread = threading.Thread(target=self._loop, name="call-worker", daemon=True)
         self._thread.start()
         with self._lock:
@@ -444,6 +446,79 @@ class CallWorkerService:
     def shutdown(self) -> None:
         self.stop()
 
+    def recover_interrupted_tasks(self, db: Session) -> int:
+        """Finish tasks left in an in-progress state by a process restart.
+
+        A crashed process may leave the modem with an active call.  Attempt one
+        real ``AT+CHUP`` cleanup before marking every stale task failed.  The
+        caller commits the transaction; when no stale task exists, no serial
+        port is opened.
+        """
+
+        tasks = db.scalars(
+            select(CallTask)
+            .where(CallTask.status.in_(("dialing", "connected")))
+            .order_by(CallTask.started_at.asc(), CallTask.created_at.asc())
+        ).all()
+        if not tasks:
+            return 0
+
+        cleanup_error = ""
+        try:
+            with ModemClient(self.settings.modem_port, self.settings.modem_baud) as modem:
+                modem.hangup()
+        except Exception as exc:  # noqa: BLE001 - recovery must still close records
+            cleanup_error = str(exc)
+
+        interrupted_message = "进程重启中断，未完成释放。"
+        for task in tasks:
+            record = task.call_record
+            if record is None:
+                record = CallRecord(
+                    task=task,
+                    plan=task.plan,
+                    customer=task.customer,
+                    script=task.script,
+                    contact=task.contact,
+                    dial_number=task.dial_number,
+                    status=task.status,
+                )
+                db.add(record)
+            db.add(
+                CallEvent(
+                    call_record=record,
+                    event_type="recovery",
+                    message=interrupted_message,
+                )
+            )
+            if cleanup_error:
+                db.add(
+                    CallEvent(
+                        call_record=record,
+                        event_type="error",
+                        message=f"AT+CHUP 清理失败: {cleanup_error}",
+                    )
+                )
+            else:
+                db.add(
+                    CallEvent(
+                        call_record=record,
+                        event_type="hangup",
+                        message="AT+CHUP (进程重启清理)",
+                    )
+                )
+            self.worker._finalize(
+                db,
+                task,
+                record,
+                "failed",
+                None,
+                interrupted_message
+                if not cleanup_error
+                else f"{interrupted_message} AT+CHUP 清理失败: {cleanup_error}",
+            )
+        return len(tasks)
+
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
@@ -460,6 +535,11 @@ class CallWorkerService:
             self._status["running"] = False
 
     def _tick(self, db: Session) -> None:
+        if not self._recovery_done:
+            self.recover_interrupted_tasks(db)
+            db.commit()
+            self._recovery_done = True
+
         task = self.worker.claim_next_task(db)
         db.commit()  # 尽早持久化 dialing，防止重复领取。
         if task is None:

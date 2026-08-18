@@ -322,6 +322,39 @@ def mark_missed_once_plans(db: Session, now: datetime | None = None) -> int:
     return len(plans)
 
 
+def advance_overdue_cron_plans(db: Session, now: datetime | None = None) -> int:
+    """Move overdue cron plans to their next future fire time after a restart.
+
+    The scheduler normally enqueues one due cron occurrence per tick.  On
+    startup, however, ``next_run_at`` may point into a period when the process
+    was down; advancing it first prevents replaying that historical occurrence.
+    """
+
+    now = as_utc(now) or utcnow()
+    plans = db.scalars(
+        select(CallbackPlan)
+        .where(
+            CallbackPlan.enabled.is_(True),
+            CallbackPlan.trigger_type == "cron",
+            CallbackPlan.next_run_at.is_not(None),
+            CallbackPlan.next_run_at <= now,
+        )
+        .order_by(CallbackPlan.next_run_at.asc(), CallbackPlan.created_at.asc())
+    ).all()
+
+    for plan in plans:
+        plan.next_run_at = compute_next_run_at(
+            plan.trigger_type,
+            plan.run_at,
+            plan.cron_expr,
+            plan.timezone,
+            # CronTrigger includes an occurrence exactly at ``from_time``;
+            # restart recovery must skip that historical boundary.
+            from_time=now + timedelta(seconds=1),
+        )
+    return len(plans)
+
+
 def enqueue_due_plans(db: Session, now: datetime | None = None) -> int:
     now = as_utc(now) or utcnow()
     plans = db.scalars(

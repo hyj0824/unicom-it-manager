@@ -14,7 +14,7 @@ from app.audio import PlaybackResult
 from app.config import Settings
 from app.models import AppSetting, CallEvent, CallTask, Customer, Script, utcnow
 from app.services import plans as plan_service
-from app.services.call_worker import CallWorker
+from app.services.call_worker import CallWorker, CallWorkerService
 from app.services.settings import (
     CALL_WORKER_ENABLED_KEY,
     ensure_default_settings,
@@ -376,6 +376,56 @@ def test_future_due_task_is_not_claimed_until_due(fake_modem, db, tmp_path) -> N
     db.commit()
     db.refresh(future)
     assert future.status == "dialing"
+
+
+def test_recover_interrupted_tasks_finalizes_stale_calls(fake_modem, db, tmp_path) -> None:
+    ctx, configure = fake_modem
+    dialing = _make_task(db, tmp_path)
+    connected = _make_task(db, tmp_path, phone="13900000001")
+    dialing.status = "dialing"
+    dialing.call_record.status = "dialing"
+    connected.status = "connected"
+    connected.call_record.status = "connected"
+    db.commit()
+
+    service = CallWorkerService(_settings(call_worker_enabled=True))
+    assert service.recover_interrupted_tasks(db) == 2
+    db.commit()
+    db.refresh(dialing)
+    db.refresh(connected)
+
+    for task in (dialing, connected):
+        assert task.status == "failed"
+        assert task.completed_at is not None
+        assert task.call_record.status == "failed"
+        assert "进程重启中断，未完成释放" in task.error_message
+        assert any(event.event_type == "recovery" for event in task.call_record.events)
+        assert any(event.event_type == "hangup" for event in task.call_record.events)
+        assert any(event.event_type == "failed" for event in task.call_record.events)
+    assert ctx.modem.commands == ["AT+CHUP"]
+
+
+def test_worker_tick_recovers_before_claiming_new_task(fake_modem, db, tmp_path, monkeypatch) -> None:
+    ctx, configure = fake_modem
+    stale = _make_task(db, tmp_path)
+    stale.status = "connected"
+    stale.call_record.status = "connected"
+    db.commit()
+
+    service = CallWorkerService(_settings(call_worker_enabled=True))
+    observed_statuses = []
+
+    def claim_after_recovery(session):
+        observed_statuses.append(stale.status)
+        return None
+
+    monkeypatch.setattr(service.worker, "claim_next_task", claim_after_recovery)
+    service._tick(db)
+    db.refresh(stale)
+
+    assert stale.status == "failed"
+    assert observed_statuses == ["failed"]
+    assert ctx.modem.commands == ["AT+CHUP"]
 
 
 def test_events_stamped_at_creation_not_flush(db, tmp_path) -> None:

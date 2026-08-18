@@ -8,7 +8,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .config import get_settings
 from .database import SessionLocal
 from .models import utcnow
-from .services.plans import enqueue_due_plans, mark_missed_once_plans
+from .services.plans import (
+    advance_overdue_cron_plans,
+    enqueue_due_plans,
+    mark_missed_once_plans,
+)
 from .services.settings import ensure_default_settings, is_scheduler_enabled
 
 
@@ -32,6 +36,7 @@ class SchedulerService:
         with SessionLocal() as db:
             ensure_default_settings(db)
             mark_missed_once_plans(db)
+            advance_overdue_cron_plans(db)
             db.commit()
 
         scheduler = BackgroundScheduler(timezone=_scheduler_timezone())
