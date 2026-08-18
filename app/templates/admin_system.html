@@ -104,6 +104,21 @@
       </div>
     </section>
 
+    <section class="panel">
+      <div class="panel-head">
+        <h2>备份任务</h2>
+        <span class="status-pill {{ 'ok' if backup_status.enabled else 'muted' }}">{{ '运行中' if backup_status.enabled else '已关闭' }}</span>
+      </div>
+      <div class="summary-grid">
+        <div><span>最近成功</span><strong>{{ backup_status.last_success_at or '-' }}</strong></div>
+        <div><span>最近失败</span><strong>{{ backup_status.last_failure or '-' }}</strong></div>
+        <div><span>远端状态</span><strong>{{ backup_status.remote_state }}</strong></div>
+        <div><span>最近远端成功</span><strong>{{ backup_status.remote_last_success_at or '-' }}</strong></div>
+        <div><span>远端错误</span><strong>{{ backup_status.remote_last_error or '-' }}</strong></div>
+      </div>
+      <div class="panel-foot"><a class="button secondary" href="/admin/backups">查看备份历史与手动备份</a></div>
+    </section>
+
   {% elif tab == 'logs' %}
     <section class="panel">
       <div class="panel-head">

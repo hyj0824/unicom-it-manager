@@ -51,6 +51,14 @@ class Settings:
     # 外呼 Worker 自动启动硬开关：默认关闭，防止开发/测试时误拨电话。
     call_worker_enabled: bool
     worker_poll_seconds: int
+    backup_enabled: bool = True
+    backup_interval_hours: int = 24
+    backup_retention_days: int = 30
+    backup_dir: str = "data/backups"
+    backup_max_retries: int = 2
+    backup_webdav_url: str = ""
+    backup_webdav_username: str = ""
+    backup_webdav_password: str = ""
 
     @property
     def cookie_secret(self) -> str:
@@ -79,6 +87,14 @@ def get_settings() -> Settings:
         call_worker_enabled=_env("CALL_WORKER_ENABLED", "0").lower()
         in {"1", "true", "yes", "on"},
         worker_poll_seconds=_env_int("WORKER_POLL_SECONDS", 5),
+        backup_enabled=_env("BACKUP_ENABLED", "1").lower() in {"1", "true", "yes", "on"},
+        backup_interval_hours=_env_int("BACKUP_INTERVAL_HOURS", 24),
+        backup_retention_days=_env_int("BACKUP_RETENTION_DAYS", 30),
+        backup_dir=_env("BACKUP_DIR", "data/backups"),
+        backup_max_retries=_env_int("BACKUP_MAX_RETRIES", 2),
+        backup_webdav_url=_env("BACKUP_WEBDAV_URL"),
+        backup_webdav_username=_env("BACKUP_WEBDAV_USERNAME"),
+        backup_webdav_password=_env("BACKUP_WEBDAV_PASSWORD"),
     )
 
 

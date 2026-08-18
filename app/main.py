@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, or_, select, text
@@ -56,6 +56,7 @@ from .services import ledger as ledger_service
 from .services import reviews as review_service
 from .services import plans as plan_service
 from .services.call_worker import call_worker_service, modem_availability
+from .services.backups import backup_service
 from .services.customers import customer_phone_map, referencing_counts as customer_referencing_counts
 from .services.dictionaries import active_items, resolve_or_create_item
 from .services.scripts import generate_script_audio, referencing_counts as script_referencing_counts
@@ -211,7 +212,9 @@ async def lifespan(app: FastAPI):
         db.commit()
     scheduler_service.start()
     call_worker_service.start()
+    backup_service.start()
     yield
+    backup_service.shutdown()
     call_worker_service.shutdown()
     scheduler_service.shutdown()
 
@@ -1503,6 +1506,77 @@ def export_ledger(request: Request, db: Session = Depends(get_db)):
     )
 
 
+# ---------------------------------------------------------------- 备份与灾备
+
+
+def _backups_template(
+    request: Request,
+    db: Session,
+    error: str = "",
+    success: str = "",
+    status_code: int = 200,
+):
+    return render(
+        request,
+        "admin_backups.html",
+        db,
+        status_code=status_code,
+        backups=backup_service.list_backups(),
+        backup_status=backup_service.status(),
+        error=error,
+        success=success,
+    )
+
+
+@app.get("/admin/backups")
+def admin_backups_page(request: Request, db: Session = Depends(get_db)):
+    auth.require_login(request)
+    return _backups_template(request, db)
+
+
+@app.post("/admin/backups")
+def admin_backup_create(request: Request, db: Session = Depends(get_db)):
+    auth.require_login(request)
+    try:
+        info = backup_service.create_backup()
+    except Exception as exc:  # noqa: BLE001 - display operational failure to admin
+        ledger_service.log_action(
+            db, "backup_failed", _user_id(request), "backup",
+            detail=json.dumps({"error": str(exc)[:500]}, ensure_ascii=False),
+            ip_address=_client_ip(request),
+        )
+        db.commit()
+        return _backups_template(request, db, error=f"备份失败：{exc}", status_code=500)
+    ledger_service.log_action(
+        db, "backup_created", _user_id(request), "backup",
+        detail=json.dumps({"filename": info.filename, "remote_uploaded": info.remote_uploaded}, ensure_ascii=False),
+        ip_address=_client_ip(request),
+    )
+    db.commit()
+    remote_note = "，已上传 WebDAV" if info.remote_uploaded else ""
+    return _backups_template(request, db, success=f"备份已创建：{info.filename}{remote_note}")
+
+
+@app.get("/admin/backups/{filename}/download")
+def admin_backup_download(filename: str, request: Request, db: Session = Depends(get_db)):
+    auth.require_login(request)
+    path = backup_service.backup_directory / filename
+    if (
+        Path(filename).name != filename
+        or not filename.startswith("callback-backup-v")
+        or path.suffix != ".zip"
+        or not path.is_file()
+    ):
+        raise HTTPException(status_code=404)
+    ledger_service.log_action(
+        db, "backup_download", _user_id(request), "backup",
+        detail=json.dumps({"filename": filename}, ensure_ascii=False),
+        ip_address=_client_ip(request),
+    )
+    db.commit()
+    return FileResponse(path, media_type="application/zip", filename=filename)
+
+
 # ---------------------------------------------------------------- 系统管理
 
 
@@ -1645,6 +1719,12 @@ ENV_SETTINGS = [
     ("DEFAULT_TIMEZONE", lambda s: s.default_timezone, "计划默认时区"),
     ("CALL_WORKER_ENABLED", lambda s: "是" if s.call_worker_enabled else "否", "外呼 Worker 自动启动硬开关"),
     ("WORKER_POLL_SECONDS", lambda s: s.worker_poll_seconds, "Worker 空闲轮询间隔（秒）"),
+    ("BACKUP_ENABLED", lambda s: "是" if s.backup_enabled else "否", "后台定期备份开关"),
+    ("BACKUP_INTERVAL_HOURS", lambda s: s.backup_interval_hours, "备份间隔（小时）"),
+    ("BACKUP_RETENTION_DAYS", lambda s: s.backup_retention_days, "本地备份保留天数"),
+    ("BACKUP_DIR", lambda s: s.backup_dir, "本地备份目录"),
+    ("BACKUP_MAX_RETRIES", lambda s: s.backup_max_retries, "远端上传失败重试次数"),
+    ("BACKUP_WEBDAV_URL", lambda s: "已配置" if s.backup_webdav_url else "未配置", "WebDAV 目标（凭据不展示）"),
 ]
 
 
@@ -1695,6 +1775,7 @@ def admin_system_page(
             scripts_with_wav=scripts_with_wav,
             today_records=today_records,
             schema=_schema_status(db),
+            backup_status=backup_service.status(),
         )
 
     if tab == "logs":
