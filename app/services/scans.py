@@ -2,11 +2,12 @@ from __future__ import annotations
 
 """运营支撑助手：每日扫描生成通知任务。
 
-按 `ScanSchedule` 配置扫描台账，把到期维系、设备回收等待办汇总成
+按 `ScanSchedule` 配置扫描台账，把到期维系、设备回收、审核卡单等待办汇总成
 `CallTask` 通知任务（通知对象是运维工作人员，不是客户本人）：
 
 - `due_renewal`（协议到期维系）：协议到期前 N 天（lead_days）提醒客户经理续签；
-- `device_recycle`（退网设备回收）：退网业务下未回收的设备，提醒网络维护责任人回收。
+- `device_recycle`（退网设备回收）：退网业务下未回收的设备，提醒网络维护责任人回收；
+- `review_stuck`（审核卡单提醒）：submitted 超过阈值未审核的变更申请，提醒审核人员处理。
 
 调度器只负责到点调用 `run_scan_for_schedule`；本模块负责查询、话术渲染、
 去重与任务入队，事务提交由调用方负责。扫描过程不访问串口/声卡，与真实
@@ -27,19 +28,26 @@ from ..config import get_settings
 from ..models import (
     BusinessService,
     CallTask,
+    ChangeItem,
+    ChangeSet,
     Contact,
     CustomerContact,
     NetworkDevice,
+    Permission,
+    RolePermission,
     ScanSchedule,
     Script,
+    User,
+    UserRole,
     utcnow,
 )
 from . import scripts as script_service
+from .settings import get_setting
 
 logger = logging.getLogger(__name__)
 
 # 话术占位符约定：{{客户名称}} {{业务号码}} {{协议到期日}} {{负责人姓名}}
-# {{设备编码}} {{扫描类型}}。缺失占位符渲染后保留原样，便于发现模板缺键。
+# {{设备编码}} {{审核单标题}} {{扫描类型}}。缺失占位符渲染后保留原样，便于发现模板缺键。
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
 # 内置默认话术：schedule.script 为空时按 scan_type 使用。
@@ -54,11 +62,17 @@ DEFAULT_TEMPLATES: dict[str, str] = {
         "{{业务号码}}业务已退网，其中设备{{设备编码}}尚未回收，请{{负责人姓名}}尽快"
         "安排回收，感谢您的配合。"
     ),
+    "review_stuck": (
+        "您好，这里是XX运维支撑中心，通知您处理{{扫描类型}}任务：客户{{客户名称}}的"
+        "{{业务号码}}业务提交的审核单「{{审核单标题}}」已长时间未审核，请{{负责人姓名}}"
+        "尽快登录系统审核处理，感谢您的配合。"
+    ),
 }
 
 SCAN_TYPE_LABELS: dict[str, str] = {
     "due_renewal": "协议到期维系",
     "device_recycle": "退网设备回收",
+    "review_stuck": "审核卡单提醒",
 }
 
 # 通知对象职责（customer_contacts.duty）。
@@ -68,6 +82,11 @@ DUTY_NETWORK_MAINTENANCE = "网络维护责任人"
 # 扫描任务来源（CallTask.source），与 TODO 任务来源约定一致。
 SOURCE_DUE_RENEWAL = "due_renewal"
 SOURCE_DEVICE_RECYCLE = "device_recycle"
+SOURCE_REVIEW_STUCK = "review_stuck"
+
+# 审核卡单阈值（小时）的 app_settings 键；缺失或非法时用默认 24 小时。
+REVIEW_STUCK_HOURS_KEY = "review_stuck_hours"
+DEFAULT_REVIEW_STUCK_HOURS = 24
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +489,173 @@ def run_device_recycle_scan(
 
 
 # ---------------------------------------------------------------------------
+# 审核卡单提醒扫描
+# ---------------------------------------------------------------------------
+
+
+def _review_stuck_hours(db: Session) -> int:
+    """审核卡单阈值（小时）：从 app_settings 读取，缺失或非法时回退默认值。"""
+
+    raw = get_setting(db, REVIEW_STUCK_HOURS_KEY, str(DEFAULT_REVIEW_STUCK_HOURS))
+    try:
+        hours = int(raw)
+    except (TypeError, ValueError):
+        hours = 0
+    if hours < 1:
+        logger.warning(
+            "app_settings %s 非法：%r，使用默认 %d",
+            REVIEW_STUCK_HOURS_KEY,
+            raw,
+            DEFAULT_REVIEW_STUCK_HOURS,
+        )
+        return DEFAULT_REVIEW_STUCK_HOURS
+    return hours
+
+
+def _reviewer_users(db: Session) -> list[User]:
+    """审核人员：is_enabled 且绑定角色（user_roles→roles→role_permissions→
+    permissions）拥有 code='review' 权限的用户，按 id 升序。
+
+    权限/角色引用数据缺失时返回空列表（扫描自然跳过，不视为异常）。
+    """
+
+    permission_id = db.scalar(select(Permission.id).where(Permission.code == "review"))
+    if permission_id is None:
+        return []
+    role_ids = db.scalars(
+        select(RolePermission.role_id).where(RolePermission.permission_id == permission_id)
+    ).all()
+    if not role_ids:
+        return []
+    return db.scalars(
+        select(User)
+        .join(UserRole, UserRole.user_id == User.id)
+        .where(User.is_enabled.is_(True), UserRole.role_id.in_(role_ids))
+        .distinct()
+        .order_by(User.id.asc())
+    ).all()
+
+
+def _change_set_business(db: Session, change_set: ChangeSet) -> BusinessService | None:
+    """变更单关联的业务：取第一条 BusinessService 变更项对应的业务。
+
+    审核卡单提醒话术需要客户名称/业务号码；创建类变更（entity_id 为空）或
+    业务已不存在时无法定位客户，返回 None 由调用方跳过。
+    """
+
+    for item in change_set.items:
+        if item.entity_type != "BusinessService" or item.entity_id is None:
+            continue
+        service = db.get(BusinessService, item.entity_id)
+        if service is not None:
+            return service
+    return None
+
+
+def run_review_stuck_scan(
+    db: Session, schedule: ScanSchedule, now: datetime | None = None
+) -> int:
+    """扫描审核卡单：status=submitted 且 submitted_at 早于「当前-卡单阈值」的
+    变更申请，逐卡单逐审核人员生成一条通知任务，返回任务数。
+
+    阈值小时数从 app_settings「review_stuck_hours」读取（默认 24）；通知对象
+    为绑定角色拥有 review 权限的启用用户（user.phone 为空跳过）；同一天同一
+    change_set 不重复通知（meta_json change_set_id 去重）。
+    """
+
+    now_utc = _as_utc(now) if now is not None else utcnow()
+    zone = _get_zone(schedule.timezone)
+    day_start_utc = _local_date_utc(now_utc, schedule.timezone)
+    scan_date = now_utc.astimezone(zone).strftime("%Y-%m-%d")
+
+    hours = _review_stuck_hours(db)
+    threshold_at = now_utc - timedelta(hours=hours)
+    template = _template_for(schedule)
+    existing = _existing_target_ids(db, SOURCE_REVIEW_STUCK, day_start_utc, "change_set_id")
+    reviewers = [u for u in _reviewer_users(db) if (u.phone or "").strip()]
+    if not reviewers:
+        logger.info(
+            "扫描 #%s「%s」：没有可通知的审核人员（拥有 review 权限且有手机的启用用户），跳过",
+            schedule.id,
+            schedule.name,
+        )
+        return 0
+    settings = get_settings()
+
+    change_sets = db.scalars(
+        select(ChangeSet)
+        .where(ChangeSet.status == "submitted")
+        .order_by(ChangeSet.id.asc())
+    ).all()
+
+    created = 0
+    for change_set in change_sets:
+        # submitted_at 可能为 naive UTC（与台账导入一致），统一转 UTC 比较。
+        if change_set.submitted_at is None:
+            continue
+        if _as_utc(change_set.submitted_at) >= threshold_at:
+            continue
+        if change_set.id in existing:
+            logger.info(
+                "扫描 #%s：变更申请 %s 当天已有卡单提醒任务，跳过",
+                schedule.id,
+                change_set.id,
+            )
+            continue
+        service = _change_set_business(db, change_set)
+        if service is None:
+            logger.info(
+                "扫描 #%s：变更申请 %s（%s）无关联业务客户，跳过",
+                schedule.id,
+                change_set.id,
+                change_set.title,
+            )
+            continue
+        for user in reviewers:
+            ctx = {
+                "客户名称": service.customer.name if service.customer else "",
+                "业务号码": service.service_number,
+                "审核单标题": change_set.title,
+                "负责人姓名": (user.real_name or "").strip() or user.username,
+                "扫描类型": SCAN_TYPE_LABELS.get(schedule.scan_type, schedule.scan_type),
+            }
+            body = render_script_template(template, ctx)
+            script = _make_scan_script(db, schedule, body, scan_date)
+            db.add(
+                CallTask(
+                    plan=None,
+                    scan_schedule=schedule,
+                    customer_id=service.customer_id,
+                    script=script,
+                    contact=None,
+                    dial_number=user.phone.strip(),
+                    due_at=utcnow(),
+                    status="queued",
+                    source=SOURCE_REVIEW_STUCK,
+                    max_attempts=settings.max_call_attempts,
+                    meta_json=json.dumps(
+                        {
+                            "change_set_id": change_set.id,
+                            "rendered_script": body,
+                            "review_stuck_hours": hours,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            created += 1
+    db.flush()
+    logger.info(
+        "扫描 #%s「%s」：%s 生成 %d 条通知任务",
+        schedule.id,
+        schedule.name,
+        SCAN_TYPE_LABELS.get(schedule.scan_type, schedule.scan_type),
+        created,
+    )
+    return created
+
+
+# ---------------------------------------------------------------------------
 # 统一入口：调度器契约 run_scan_for_schedule(db, schedule) -> int
 # ---------------------------------------------------------------------------
 
@@ -477,6 +663,7 @@ def run_device_recycle_scan(
 _SCAN_RUNNERS: dict[str, Callable[..., int]] = {
     SOURCE_DUE_RENEWAL: run_due_renewal_scan,
     SOURCE_DEVICE_RECYCLE: run_device_recycle_scan,
+    SOURCE_REVIEW_STUCK: run_review_stuck_scan,
 }
 
 
