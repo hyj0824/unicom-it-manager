@@ -71,7 +71,7 @@ from .services.settings import (
     is_worker_enabled,
     set_setting,
 )
-from .services.users import hash_password, role_names, set_user_roles
+from .services.users import hash_password, role_names, set_user_roles, validate_user_profile
 
 
 settings = get_settings()
@@ -1396,6 +1396,17 @@ def admin_backup_download(filename: str, request: Request, db: Session = Depends
 @app.get("/admin/users")
 def admin_users_page(request: Request, edit_id: int | None = None, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "manage_users", "system")
+    return _users_page(request, db, edit_user=db.get(User, edit_id) if edit_id else None)
+
+
+def _users_page(
+    request: Request,
+    db: Session,
+    error: str | None = None,
+    edit_user: User | None = None,
+    status_code: int = 200,
+):
+    """/admin/users 页面渲染：统一错误回显所需的列表与角色上下文。"""
     users = db.scalars(select(User).order_by(User.created_at.asc())).all()
     roles = db.scalars(select(Role).order_by(Role.id.asc())).all()
     user_role_map = {
@@ -1412,7 +1423,9 @@ def admin_users_page(request: Request, edit_id: int | None = None, db: Session =
         roles=roles,
         user_role_map=user_role_map,
         role_name_map={user.id: role_names(db, user) for user in users},
-        edit_user=db.get(User, edit_id) if edit_id else None,
+        edit_user=edit_user,
+        error=error,
+        status_code=status_code,
     )
 
 
@@ -1422,17 +1435,21 @@ async def admin_user_create(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     username = str(form.get("username", "")).strip()
     display_name = str(form.get("display_name", "")).strip()
+    real_name = str(form.get("real_name", "")).strip()
+    phone = str(form.get("phone", "")).strip()
     password = str(form.get("password", ""))
     role_ids = [int(v) for v in form.getlist("role_ids")]
     enabled = str(form.get("enabled", "")) == "on"
     if not username or not password:
-        return render(request, "admin_users.html", db, error="用户名和初始密码必填。", status_code=400,
-                      users=db.scalars(select(User).order_by(User.created_at.asc())).all(),
-                      roles=db.scalars(select(Role).order_by(Role.id.asc())).all(),
-                      user_role_map={}, role_name_map={}, edit_user=None)
+        return _users_page(request, db, error="用户名和初始密码必填。", status_code=400)
+    error = validate_user_profile(real_name, phone)
+    if error:
+        return _users_page(request, db, error=error, status_code=400)
     user = User(
         username=username,
         display_name=display_name,
+        real_name=real_name,
+        phone=phone,
         password_hash=hash_password(password),
         is_enabled=enabled,
         is_superadmin=False,
@@ -1444,10 +1461,7 @@ async def admin_user_create(request: Request, db: Session = Depends(get_db)):
         db.commit()
     except IntegrityError:
         db.rollback()
-        return render(request, "admin_users.html", db, error=f"用户名 {username} 已存在。", status_code=400,
-                      users=db.scalars(select(User).order_by(User.created_at.asc())).all(),
-                      roles=db.scalars(select(Role).order_by(Role.id.asc())).all(),
-                      user_role_map={}, role_name_map={}, edit_user=None)
+        return _users_page(request, db, error=f"用户名 {username} 已存在。", status_code=400)
     ledger_service.log_action(
         db, "manage_users", _user_id(request), "user", user.id,
         json.dumps({"operation": "create", "username": username}, ensure_ascii=False),
@@ -1462,6 +1476,13 @@ async def admin_user_update(user_id: int, request: Request, db: Session = Depend
     auth.require_permission(db, request, "manage_users", "system")
     user = get_or_404(db, User, user_id)
     form = await request.form()
+    real_name = str(form.get("real_name", "")).strip()
+    phone = str(form.get("phone", "")).strip()
+    error = validate_user_profile(real_name, phone, is_superadmin=user.is_superadmin)
+    if error:
+        return _users_page(request, db, error=error, edit_user=user, status_code=400)
+    user.real_name = real_name
+    user.phone = phone
     user.display_name = str(form.get("display_name", "")).strip()
     user.is_enabled = str(form.get("enabled", "")) == "on"
     role_ids = [int(v) for v in form.getlist("role_ids")]
@@ -1483,12 +1504,7 @@ async def admin_user_password(user_id: int, request: Request, db: Session = Depe
     form = await request.form()
     password = str(form.get("password", ""))
     if len(password) < 8:
-        return render(
-            request, "admin_users.html", db, error="密码至少 8 位。", status_code=400,
-            users=db.scalars(select(User).order_by(User.created_at.asc())).all(),
-            roles=db.scalars(select(Role).order_by(Role.id.asc())).all(),
-            user_role_map={}, role_name_map={}, edit_user=user,
-        )
+        return _users_page(request, db, error="密码至少 8 位。", edit_user=user, status_code=400)
     user.password_hash = hash_password(password)
     db.commit()
     return redirect_to("/admin/users")

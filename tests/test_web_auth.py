@@ -461,3 +461,131 @@ def test_scheduler_toggle_through_web(client: TestClient, webdb) -> None:
     resp = client.post("/settings/scheduler", data={"enabled": "0"}, follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/login"
+
+
+# ---------------------------------------------------------------- 用户实名与手机
+
+
+def test_user_create_validates_real_name_and_phone(client: TestClient, webdb) -> None:
+    login(client)
+    base = {
+        "username": "ops-user",
+        "password": "ops-password-1",
+        "real_name": "张三",
+        "phone": "13800000000",
+    }
+    # 缺实名 → 400。
+    resp = client.post("/admin/users", data={**base, "real_name": ""})
+    assert resp.status_code == 400
+    assert "实名必填" in resp.text
+    # 非管理员缺手机 → 400。
+    resp = client.post("/admin/users", data={**base, "phone": ""})
+    assert resp.status_code == 400
+    assert "手机号必填" in resp.text
+    # 手机格式错误 → 400。
+    resp = client.post("/admin/users", data={**base, "phone": "123"})
+    assert resp.status_code == 400
+    assert "手机号格式不正确" in resp.text
+    # 校验失败时用户未落库。
+    with webdb() as db:
+        assert db.scalar(select(User).where(User.username == "ops-user")) is None
+
+
+@pytest.mark.parametrize("phone", ["13800000000", "+8613800000000"])
+def test_user_create_and_edit_persist_fields(client: TestClient, webdb, phone: str) -> None:
+    login(client)
+    resp = client.post(
+        "/admin/users",
+        data={
+            "username": "ops-user",
+            "password": "ops-password-1",
+            "real_name": "张三",
+            "phone": phone,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    with webdb() as db:
+        user = db.scalar(select(User).where(User.username == "ops-user"))
+        assert user is not None
+        assert user.real_name == "张三"
+        assert user.phone == phone
+        user_id = user.id
+
+    # 列表页显示实名/手机；表单含系统管理员可不填的提示。
+    resp = client.get("/admin/users")
+    assert resp.status_code == 200
+    assert "张三" in resp.text
+    assert phone in resp.text
+    assert "系统管理员可不填" in resp.text
+
+    # 编辑实名/手机 → 落库。
+    resp = client.post(
+        f"/admin/users/{user_id}/edit",
+        data={"real_name": "李四", "phone": "13900000001", "enabled": "1"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    with webdb() as db:
+        user = db.get(User, user_id)
+        assert user.real_name == "李四"
+        assert user.phone == "13900000001"
+
+    # 编辑同样校验：缺实名 / 手机格式错误 → 400 且字段不变。
+    resp = client.post(
+        f"/admin/users/{user_id}/edit",
+        data={"real_name": "", "phone": "13900000001"},
+    )
+    assert resp.status_code == 400
+    assert "实名必填" in resp.text
+    resp = client.post(
+        f"/admin/users/{user_id}/edit",
+        data={"real_name": "李四", "phone": "bad-phone"},
+    )
+    assert resp.status_code == 400
+    assert "手机号格式不正确" in resp.text
+    with webdb() as db:
+        user = db.get(User, user_id)
+        assert user.real_name == "李四"
+        assert user.phone == "13900000001"
+
+
+def test_superadmin_user_may_edit_without_phone(client: TestClient, webdb) -> None:
+    login(client)
+    with webdb() as db:
+        superadmin = User(
+            username="super-admin",
+            real_name="系统管理员",
+            phone="",
+            password_hash=hash_password("sa-password-1"),
+            is_enabled=True,
+            is_superadmin=True,
+        )
+        db.add(superadmin)
+        db.commit()
+        admin_id = superadmin.id
+
+    # 系统管理员可留空手机；实名仍必填。
+    resp = client.post(
+        f"/admin/users/{admin_id}/edit",
+        data={"real_name": "系统管理员", "phone": "", "enabled": "1"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    resp = client.post(
+        f"/admin/users/{admin_id}/edit",
+        data={"real_name": "", "phone": ""},
+    )
+    assert resp.status_code == 400
+    assert "实名必填" in resp.text
+    # 超管填了手机也必须格式正确。
+    resp = client.post(
+        f"/admin/users/{admin_id}/edit",
+        data={"real_name": "系统管理员", "phone": "123"},
+    )
+    assert resp.status_code == 400
+    assert "手机号格式不正确" in resp.text
+    with webdb() as db:
+        user = db.get(User, admin_id)
+        assert user.phone == ""
+        assert user.real_name == "系统管理员"
