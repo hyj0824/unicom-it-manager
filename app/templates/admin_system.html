@@ -18,7 +18,7 @@
       <div class="summary-grid">
         <div><span>进程状态</span><strong>{{ '运行' if scheduler_status.running else '未运行' }}</strong></div>
         <div><span>最近扫描</span><strong>{{ scheduler_status.last_tick_at|dt }}</strong></div>
-        <div><span>到期计划</span><strong>每 15 秒扫描一次，仅入队不拨号</strong></div>
+        <div><span>扫描触发</span><strong>每分钟检查一次扫描配置，匹配时生成通知任务，不直接拨号</strong></div>
       </div>
       <div class="panel-foot">
         <form method="post" action="/settings/scheduler">

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .. import audio as audio_module
 from ..audio import install_wav, script_audio_path
 from ..config import Settings
-from ..models import CallRecord, CallTask, CallbackPlan, Script
+from ..models import CallRecord, CallTask, CallbackPlan, ScanSchedule, Script
 from ..tts.none import NoneTTSProvider
 
 
@@ -83,6 +83,10 @@ def referencing_counts(db: Session, script: Script) -> dict[str, int]:
     """统计引用该话术、导致无法硬删除的业务对象数量。"""
 
     return {
+        "schedules": db.scalar(
+            select(func.count(ScanSchedule.id)).where(ScanSchedule.script_id == script.id)
+        )
+        or 0,
         "plans": db.scalar(
             select(func.count(CallbackPlan.id)).where(CallbackPlan.script_id == script.id)
         )

@@ -1,26 +1,28 @@
-"""调度流程的临时 SQLite 测试：到期入队、暂停调度、立即拨打、重启恢复。
+"""调度器扫描触发流程的临时 SQLite 测试。
 
-覆盖 TODO「P1：测试与可靠性」：
-- 到期计划入队（once 关闭、cron 推进下一次执行时间、按 due_at 排序）；
-- 暂停调度时（is_scheduler_enabled 为 False）tick 不生成任务；
-- 立即拨打（create_call_task 手动路径）；
-- 重启恢复（mark_missed_once_plans：once 记为 missed，cron 不补打）。
+覆盖「运营支撑助手」定位下的扫描通知调度：
+- 遍历 enabled 的 scan_schedules，按各自时区判断 cron 是否匹配当前分钟；
+- 匹配时调用 app.services.scans.run_scan_for_schedule（契约：返回生成任务数），
+  测试用注入的假模块替换，不实现、不依赖真实扫描逻辑；
+- 不匹配、enabled=False、全局调度暂停时均不调用；
+- 成功更新 last_run_at / 清空 last_error；失败记录 last_error 且不影响其他配置。
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+import sys
+import types
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-
-from app.models import CallEvent, CallRecord, CallTask, CallbackPlan, Customer, Script, utcnow
-from app.services import plans as plan_service
-from app.services.customers import sync_default_contact
+from app.models import ScanSchedule
+from app.services.plans import as_utc
 from app.services.settings import (
     SCHEDULER_ENABLED_KEY,
     is_scheduler_enabled,
@@ -28,6 +30,12 @@ from app.services.settings import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+UTC = timezone.utc
+
+
+def norm(value: datetime | None) -> datetime | None:
+    """SQLite 读回的 datetime 不带时区，统一按 UTC 归一化后再比较。"""
+    return as_utc(value)
 
 
 @pytest.fixture()
@@ -49,154 +57,51 @@ def db(engine):
     session.close()
 
 
-def norm(value):
-    """SQLite 读回的 datetime 不带时区，统一按 UTC 归一化后再比较。"""
-    return plan_service.as_utc(value)
+@pytest.fixture()
+def fake_scans(monkeypatch):
+    """把 app.services.scans 替换为带 run_scan_for_schedule 假实现的模块。
+
+    无论真实 scans 模块是否已落地（另一工作流并行开发），tick 的延迟导入
+    都会解析到这个假模块，测试行为确定。调用时先记录 (schedule_id, name)
+    再返回 0，避免 tick 会话关闭后访问过期对象。
+    """
+    module = types.ModuleType("app.services.scans")
+    calls: list[tuple[int, str]] = []
+
+    def run_scan_for_schedule(db, schedule) -> int:
+        calls.append((schedule.id, schedule.name))
+        return 0
+
+    module.calls = calls
+    module.run_scan_for_schedule = MagicMock(side_effect=run_scan_for_schedule)
+    monkeypatch.setitem(sys.modules, "app.services.scans", module)
+    return module
 
 
-def make_customer(db: Session, name: str = "客户A") -> Customer:
-    customer = Customer(name=name)
-    db.add(customer)
-    db.flush()
-    sync_default_contact(db, customer, "13800000000")
-    db.commit()
-    return customer
-
-
-def make_plan(
+def make_schedule(
     db: Session,
-    customer: Customer,
     *,
-    trigger_type: str = "once",
-    cron_expr: str = "",
-    next_run_at,
+    name: str = "到期维系扫描",
+    scan_type: str = "due_renewal",
+    cron_expr: str = "0 9 * * *",
+    timezone_name: str = "Asia/Shanghai",
     enabled: bool = True,
-) -> CallbackPlan:
-    script = Script(title="话术", body="内容")
-    db.add(script)
-    db.flush()
-    plan = CallbackPlan(
-        customer=customer,
-        script=script,
-        trigger_type=trigger_type,
+) -> ScanSchedule:
+    schedule = ScanSchedule(
+        name=name,
+        scan_type=scan_type,
         cron_expr=cron_expr,
-        timezone="Asia/Shanghai",
+        timezone=timezone_name,
+        lead_days=14,
         enabled=enabled,
-        next_run_at=next_run_at,
     )
-    db.add(plan)
+    db.add(schedule)
     db.commit()
-    return plan
+    return schedule
 
 
-def queued_tasks(db: Session) -> list[CallTask]:
-    return db.scalars(
-        select(CallTask)
-        .where(CallTask.status == "queued")
-        .order_by(CallTask.due_at.asc(), CallTask.created_at.asc())
-    ).all()
-
-
-def task_count(db: Session) -> int:
-    return db.scalar(select(func.count(CallTask.id))) or 0
-
-
-# ---------------------------------------------------------------- 到期入队
-
-
-def test_enqueue_due_once_plan_creates_queued_task(db: Session) -> None:
-    customer = make_customer(db)
-    due = utcnow() - timedelta(minutes=5)
-    plan = make_plan(db, customer, next_run_at=due)
-
-    assert plan_service.enqueue_due_plans(db) == 1
-    db.commit()
-
-    tasks = queued_tasks(db)
-    assert len(tasks) == 1
-    task = tasks[0]
-    assert task.plan_id == plan.id
-    assert task.status == "queued"
-    assert task.source == "scheduled"
-    assert norm(task.due_at) == due
-    assert task.dial_number == "13800000000"
-
-    # once 计划入队后关闭并清空下一次执行时间，避免重复生成。
-    db.expire_all()
-    plan = db.get(CallbackPlan, plan.id)
-    assert plan.enabled is False
-    assert plan.next_run_at is None
-
-    # 通话记录与事件一并落库。
-    record = db.scalar(select(CallRecord).where(CallRecord.task_id == task.id))
-    assert record is not None
-    assert record.status == "queued"
-    assert record.dial_number == "13800000000"
-    assert db.scalar(select(CallEvent).where(CallEvent.call_record_id == record.id)) is not None
-
-
-def test_enqueue_due_plans_is_idempotent_for_disabled_once(db: Session) -> None:
-    customer = make_customer(db)
-    plan = make_plan(db, customer, next_run_at=utcnow() - timedelta(minutes=5))
-
-    assert plan_service.enqueue_due_plans(db) == 1
-    assert plan_service.enqueue_due_plans(db) == 0
-    db.commit()
-    assert task_count(db) == 1
-
-
-def test_enqueue_cron_plan_advances_next_run(db: Session) -> None:
-    customer = make_customer(db)
-    plan = make_plan(
-        db,
-        customer,
-        trigger_type="cron",
-        cron_expr="0 9 * * *",
-        next_run_at=utcnow() - timedelta(minutes=1),
-    )
-
-    assert plan_service.enqueue_due_plans(db) == 1
-    db.commit()
-
-    db.expire_all()
-    plan = db.get(CallbackPlan, plan.id)
-    # cron 计划保持启用，下一次执行时间推进到未来。
-    assert plan.enabled is True
-    assert plan.next_run_at is not None
-    assert norm(plan.next_run_at) > utcnow()
-    assert len(queued_tasks(db)) == 1
-
-
-def test_enqueue_skips_future_and_disabled_plans(db: Session) -> None:
-    customer = make_customer(db)
-    make_plan(db, customer, next_run_at=utcnow() + timedelta(days=1))
-    make_plan(db, customer, next_run_at=utcnow() - timedelta(minutes=1), enabled=False)
-
-    assert plan_service.enqueue_due_plans(db) == 0
-    db.commit()
-    assert queued_tasks(db) == []
-
-
-def test_enqueue_orders_tasks_by_due_at(db: Session) -> None:
-    customer = make_customer(db)
-    earlier = utcnow() - timedelta(hours=2)
-    later = utcnow() - timedelta(hours=1)
-    plan_a = make_plan(db, customer, next_run_at=earlier)
-    plan_b = make_plan(db, customer, next_run_at=later)
-
-    plan_service.enqueue_due_plans(db)
-    db.commit()
-
-    tasks = queued_tasks(db)
-    assert [task.plan_id for task in tasks] == [plan_a.id, plan_b.id]
-
-
-# ---------------------------------------------------------------- 暂停调度
-
-
-def test_scheduler_tick_respects_pause_setting(engine, db: Session, monkeypatch) -> None:
-    """调度器 tick 在暂停（is_scheduler_enabled=False）时不生成任务。"""
-
+@pytest.fixture()
+def scheduler(engine, monkeypatch):
     import app.scheduler as scheduler_module
 
     monkeypatch.setattr(
@@ -204,137 +109,126 @@ def test_scheduler_tick_respects_pause_setting(engine, db: Session, monkeypatch)
         "SessionLocal",
         sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True),
     )
+    # 固定「当前时刻」：上海 2026-01-15 09:00:30（cron "0 9 * * *" 应匹配）。
+    fixed_now = datetime(2026, 1, 15, 1, 0, 30, tzinfo=UTC)
+    monkeypatch.setattr(scheduler_module, "utcnow", lambda: fixed_now)
+    return scheduler_module, fixed_now
 
-    customer = make_customer(db)
-    make_plan(db, customer, next_run_at=utcnow() - timedelta(minutes=1))
 
-    # 暂停状态：tick 扫描到期计划但不入队。
+# ---------------------------------------------------------------- 匹配触发
+
+
+def test_tick_runs_scan_when_cron_matches(db: Session, fake_scans, scheduler) -> None:
+    scheduler_module, fixed_now = scheduler
+    schedule = make_schedule(db)
+
+    scheduler_module.scheduler_service.tick()
+
+    fake_scans.run_scan_for_schedule.assert_called_once()
+    assert fake_scans.calls == [(schedule.id, schedule.name)]
+    db.expire_all()
+    refreshed = db.get(ScanSchedule, schedule.id)
+    assert norm(refreshed.last_run_at) == fixed_now
+    assert refreshed.last_error == ""
+
+
+def test_tick_skips_when_cron_does_not_match(db: Session, fake_scans, scheduler) -> None:
+    scheduler_module, _ = scheduler
+    schedule = make_schedule(db, cron_expr="0 18 * * *")  # 18:00，当前 09:00 不匹配
+
+    scheduler_module.scheduler_service.tick()
+
+    fake_scans.run_scan_for_schedule.assert_not_called()
+    db.expire_all()
+    assert db.get(ScanSchedule, schedule.id).last_run_at is None
+
+def test_tick_skips_disabled_schedules(db: Session, fake_scans, scheduler) -> None:
+    scheduler_module, _ = scheduler
+    make_schedule(db, enabled=False)
+
+    scheduler_module.scheduler_service.tick()
+
+    fake_scans.run_scan_for_schedule.assert_not_called()
+
+
+def test_tick_respects_each_schedule_timezone(db: Session, fake_scans, scheduler) -> None:
+    scheduler_module, _ = scheduler
+    # 当前 UTC 01:00：上海 09:00 匹配；纽约为前一日 20:00，不匹配。
+    matching = make_schedule(db, name="上海扫描", timezone_name="Asia/Shanghai")
+    make_schedule(db, name="纽约扫描", timezone_name="America/New_York")
+
+    scheduler_module.scheduler_service.tick()
+
+    assert fake_scans.run_scan_for_schedule.call_count == 1
+    assert fake_scans.calls == [(matching.id, matching.name)]
+
+
+# ---------------------------------------------------------------- 暂停与失败处理
+
+
+def test_tick_respects_global_pause_setting(db: Session, fake_scans, scheduler) -> None:
+    scheduler_module, _ = scheduler
+    make_schedule(db)
+
     set_setting(db, SCHEDULER_ENABLED_KEY, "0")
     db.commit()
     assert is_scheduler_enabled(db) is False
-    scheduler_module.scheduler_service.tick()
-    db.expire_all()
-    assert queued_tasks(db) == []
 
-    # 恢复后：tick 正常入队。
+    scheduler_module.scheduler_service.tick()
+    fake_scans.run_scan_for_schedule.assert_not_called()
+
+    # 恢复后同一分钟仍会触发（扫描配置没有 next_run 状态，按当前分钟匹配）。
     set_setting(db, SCHEDULER_ENABLED_KEY, "1")
     db.commit()
-    assert is_scheduler_enabled(db) is True
     scheduler_module.scheduler_service.tick()
+    fake_scans.run_scan_for_schedule.assert_called_once()
+
+
+def test_tick_records_last_error_and_continues_with_other_schedules(
+    db: Session, fake_scans, scheduler
+) -> None:
+    scheduler_module, _ = scheduler
+    failing = make_schedule(db, name="会失败的扫描")
+    healthy = make_schedule(db, name="正常扫描", scan_type="device_recycle", cron_expr="0 9 * * *")
+    fake_scans.run_scan_for_schedule.side_effect = [RuntimeError("boom"), 3]
+
+    scheduler_module.scheduler_service.tick()
+
+    assert fake_scans.run_scan_for_schedule.call_count == 2
     db.expire_all()
-    assert len(queued_tasks(db)) == 1
+    failed_row = db.get(ScanSchedule, failing.id)
+    assert failed_row.last_error == "RuntimeError: boom"
+    assert failed_row.last_run_at is None
+    healthy_row = db.get(ScanSchedule, healthy.id)
+    assert healthy_row.last_error == ""
+    assert norm(healthy_row.last_run_at) is not None
 
 
-# ---------------------------------------------------------------- 立即拨打
+def test_tick_records_invalid_cron_as_last_error_without_running(
+    db: Session, fake_scans, scheduler
+) -> None:
+    scheduler_module, _ = scheduler
+    schedule = make_schedule(db, cron_expr="not a cron")
 
+    scheduler_module.scheduler_service.tick()
 
-def test_manual_call_now_creates_queued_task_and_record(db: Session) -> None:
-    customer = make_customer(db)
-    plan = make_plan(db, customer, next_run_at=utcnow() + timedelta(days=1))
-    before_next_run = plan.next_run_at
-
-    task = plan_service.create_call_task(
-        db,
-        plan,
-        due_at=utcnow(),
-        status="queued",
-        message="网页端发起立即拨打。",
-        source="manual",
-    )
-    db.commit()
-
-    assert task.source == "manual"
-    assert task.status == "queued"
-    assert task.dial_number == "13800000000"
-    assert task.plan_id == plan.id
-    record = task.call_record
-    assert record is not None
-    assert record.status == "queued"
-    assert record.dial_number == "13800000000"
-    event = db.scalar(select(CallEvent).where(CallEvent.call_record_id == record.id))
-    assert event is not None
-    assert event.message == "网页端发起立即拨打。"
-
-    # 手动拨打不改变计划的下一次执行时间，也不影响计划启用状态。
-    assert plan.next_run_at == before_next_run
-    assert plan.enabled is True
-
-
-# ---------------------------------------------------------------- 重启恢复
-
-
-def test_mark_missed_once_plan_on_restart(db: Session) -> None:
-    customer = make_customer(db)
-    due = utcnow() - timedelta(hours=3)
-    plan = make_plan(db, customer, next_run_at=due)
-
-    assert plan_service.mark_missed_once_plans(db) == 1
-    db.commit()
-
+    fake_scans.run_scan_for_schedule.assert_not_called()
     db.expire_all()
-    plan = db.get(CallbackPlan, plan.id)
-    assert plan.enabled is False
-    assert plan.next_run_at is None
-    task = db.scalar(select(CallTask).where(CallTask.plan_id == plan.id))
-    assert task is not None
-    assert task.status == "missed"
-    assert norm(task.due_at) == due
-    record = db.scalar(select(CallRecord).where(CallRecord.task_id == task.id))
-    assert record.status == "missed"
+    row = db.get(ScanSchedule, schedule.id)
+    assert "ValueError" in row.last_error
+    assert "无效" in row.last_error
 
 
-def test_mark_missed_skips_future_once_plans(db: Session) -> None:
-    customer = make_customer(db)
-    plan = make_plan(db, customer, next_run_at=utcnow() + timedelta(hours=3))
+def test_tick_returns_run_counts_are_ignored_but_recorded(db: Session, fake_scans, scheduler) -> None:
+    """扫描实现返回生成任务数；调度器只记录运行时间与错误，不解读数量。"""
+    scheduler_module, fixed_now = scheduler
+    schedule = make_schedule(db)
+    fake_scans.run_scan_for_schedule.side_effect = [5]
 
-    assert plan_service.mark_missed_once_plans(db) == 0
-    db.commit()
+    scheduler_module.scheduler_service.tick()
 
+    fake_scans.run_scan_for_schedule.assert_called_once()
     db.expire_all()
-    plan = db.get(CallbackPlan, plan.id)
-    assert plan.enabled is True
-    assert plan.next_run_at is not None
-    assert task_count(db) == 0
-
-
-def test_mark_missed_skips_disabled_plans(db: Session) -> None:
-    customer = make_customer(db)
-    make_plan(db, customer, next_run_at=utcnow() - timedelta(hours=1), enabled=False)
-
-    assert plan_service.mark_missed_once_plans(db) == 0
-    db.commit()
-    assert task_count(db) == 0
-
-
-def test_cron_plans_are_not_backfilled_on_restart(db: Session) -> None:
-    """重启不补打停机期间错过的 cron 次数：不生成 missed 任务、不推进计划。"""
-
-    customer = make_customer(db)
-    past = utcnow() - timedelta(days=2)
-    plan = make_plan(
-        db,
-        customer,
-        trigger_type="cron",
-        cron_expr="0 9 * * *",
-        next_run_at=past,
-    )
-
-    assert plan_service.mark_missed_once_plans(db) == 0
-    db.commit()
-
-    db.expire_all()
-    plan = db.get(CallbackPlan, plan.id)
-    assert plan.enabled is True
-    assert norm(plan.next_run_at) == past  # 留给下一个正常 tick 推进
-    assert task_count(db) == 0
-
-
-def test_mark_missed_is_idempotent(db: Session) -> None:
-    customer = make_customer(db)
-    make_plan(db, customer, next_run_at=utcnow() - timedelta(hours=1))
-
-    assert plan_service.mark_missed_once_plans(db) == 1
-    db.commit()
-    assert plan_service.mark_missed_once_plans(db) == 0
-    db.commit()
-    assert task_count(db) == 1
+    row = db.get(ScanSchedule, schedule.id)
+    assert norm(row.last_run_at) == fixed_now
+    assert row.last_error == ""
