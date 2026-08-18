@@ -207,7 +207,8 @@ def submit_business_update(
     """提交业务变更申请（续签 / 退网）。
 
     patch = 完整快照 + updates 覆盖；base_version 取提交时的 service.version，
-    应用时由 `_apply_business` 校验版本冲突。校验失败抛 ValueError（中文提示）。
+    应用时由 `_apply_business` 校验版本冲突。同一业务已有待审核申请
+    （submitted / approved 未应用）时拒绝重复提交。校验失败抛 ValueError（中文提示）。
     """
 
     reason = str(reason or "").strip()
@@ -218,6 +219,9 @@ def submit_business_update(
     unknown = set(updates) - BUSINESS_UPDATE_FIELDS
     if unknown:
         raise ValueError(f"不支持的变更字段：{'、'.join(sorted(unknown))}。")
+    _reject_if_pending(
+        db, "BusinessService", service.id, f"业务 {service.service_number}"
+    )
 
     patch = business_snapshot_patch(db, service)
     is_retire = False
@@ -258,13 +262,17 @@ def submit_business_update(
 def submit_device_recovery(
     db: Session, device: NetworkDevice, reason: str, user_id: int | None
 ) -> ChangeSet:
-    """提交设备回收完成申请：回收状态改为「已回收」，走 network 域审核。"""
+    """提交设备回收完成申请：回收状态改为「已回收」，走 network 域审核。
+
+    设备已标记回收或已有待审核申请（submitted / approved 未应用）时拒绝提交。
+    """
 
     reason = str(reason or "").strip()
     if not reason:
         raise ValueError("申请理由不能为空。")
     if scans._device_recovered(device):
         raise ValueError(f"设备 {device.device_code} 已标记回收，无需重复申请。")
+    _reject_if_pending(db, "NetworkDevice", device.id, f"设备 {device.device_code}")
     payload = device_snapshot_patch(db, device)
     change_set = _new_change_set(
         db, f"设备回收申请：{device.device_code}", "network", reason, user_id
@@ -367,10 +375,98 @@ def _latest_change_map(db: Session, entity_type: str) -> dict[int, tuple[str, in
     return latest
 
 
+# 阻止重复申请的待审核状态：submitted（待审核）与 approved（已通过未应用）。
+# applied / rejected / cancelled 等视为已结束，不阻止再次申请。
+PENDING_CHANGE_STATUSES = ("submitted", "approved")
+
+
+def _normalize_entity_type(entity_type: str) -> str:
+    """归一化变更项实体类型：去下划线转小写。
+
+    人工申请写 "BusinessService"，导入批次写 "business_service"（见
+    reviews.build_import_change_sets），与 reviews 的判定口径保持一致。
+    """
+
+    return entity_type.replace("_", "").lower()
+
+
+def _pending_change_map(
+    db: Session, entity_type: str, entity_ids: set[int]
+) -> dict[int, ChangeSet]:
+    """实体 id → 最新待处理申请（status in submitted/approved）的映射。
+
+    按变更项 id 倒序取每个实体最新一条；供工作台行级渲染批量使用。
+    """
+
+    if not entity_ids:
+        return {}
+    normalized = _normalize_entity_type(entity_type)
+    items = db.scalars(
+        select(ChangeItem)
+        .join(ChangeSet, ChangeItem.change_set_id == ChangeSet.id)
+        .where(
+            ChangeItem.entity_id.in_(entity_ids),
+            ChangeSet.status.in_(PENDING_CHANGE_STATUSES),
+        )
+        .order_by(ChangeItem.id.desc())
+    ).all()
+    pending: dict[int, ChangeSet] = {}
+    for item in items:
+        if _normalize_entity_type(item.entity_type) != normalized:
+            continue
+        pending.setdefault(item.entity_id, item.change_set)
+    return pending
+
+
+def pending_change_for(db: Session, entity_type: str, entity_id: int) -> ChangeSet | None:
+    """实体当前待处理的申请（submitted / approved 未应用），取最新一条。
+
+    已应用、已驳回、已撤销视为已结束，不阻止再次申请。供工作台行级防重复
+    展示与提交入口校验共用。
+    """
+
+    return _pending_change_map(db, entity_type, {entity_id}).get(entity_id)
+
+
+def _reject_if_pending(db: Session, entity_type: str, entity_id: int, subject: str) -> None:
+    """提交入口防重复：实体已有待处理申请时抛 ValueError（中文提示）。"""
+
+    pending = pending_change_for(db, entity_type, entity_id)
+    if pending is not None:
+        raise ValueError(
+            f"{subject}已有待审核的申请（申请 #{pending.id}），请先处理该申请后再提交。"
+        )
+
+
+def _notification_count_map(
+    db: Session, source: str, meta_key: str, ids: set[int]
+) -> dict[int, int]:
+    """目标 id → 历史通知任务数（CallTask.source + meta_json 目标 id 匹配）。
+
+    meta 口径与扫描一致：due_renewal 用 business_service_id、device_recycle 用
+    device_id；统计全部历史任务，供「已通知次数」列展示。
+    """
+
+    if not ids:
+        return {}
+    tasks = db.scalars(select(CallTask).where(CallTask.source == source)).all()
+    counts = dict.fromkeys(ids, 0)
+    for task in tasks:
+        try:
+            meta = json.loads(task.meta_json or "{}")
+        except ValueError:
+            continue
+        value = meta.get(meta_key)
+        if value is not None and int(value) in counts:
+            counts[int(value)] += 1
+    return counts
+
+
 def list_due_renewal_rows(
     db: Session, now: datetime | None = None, timezone_name: str | None = None
 ) -> list[dict]:
-    """到期窗口内的业务行：协议到期日、客户经理、今日是否已通知、最近申请状态。"""
+    """到期窗口内的业务行：协议到期日、客户经理、今日是否已通知、历史通知
+    次数、最近申请状态、待审核申请与退网标记。"""
 
     settings = get_settings()
     tz = timezone_name or settings.default_timezone
@@ -386,16 +482,24 @@ def list_due_renewal_rows(
         )
         .order_by(BusinessService.agreement_expires_at.asc(), BusinessService.id.asc())
     ).all()
+    zone = get_zone(tz)
+    window_services: list[BusinessService] = []
+    for service in services:
+        expires_utc = _as_utc(service.agreement_expires_at)
+        if day_start <= expires_utc < window_end:
+            window_services.append(service)
+    service_ids = {service.id for service in window_services}
     notified = _notified_target_ids(
         db, scans.SOURCE_DUE_RENEWAL, day_start, "business_service_id"
     )
     latest = _latest_change_map(db, "BusinessService")
-    zone = get_zone(tz)
+    pending = _pending_change_map(db, "BusinessService", service_ids)
+    notify_counts = _notification_count_map(
+        db, scans.SOURCE_DUE_RENEWAL, "business_service_id", service_ids
+    )
     rows: list[dict] = []
-    for service in services:
+    for service in window_services:
         expires_utc = _as_utc(service.agreement_expires_at)
-        if not (day_start <= expires_utc < window_end):
-            continue
         account_manager, _ = _contact_by_duty(service, "客户经理")
         rows.append(
             {
@@ -403,7 +507,12 @@ def list_due_renewal_rows(
                 "expires_label": expires_utc.astimezone(zone).strftime("%Y-%m-%d"),
                 "account_manager": account_manager,
                 "notified_today": service.id in notified,
+                "notify_count": notify_counts.get(service.id, 0),
                 "latest_change": latest.get(service.id),
+                # 待审核申请（submitted / approved 未应用）：有则隐藏申请按钮。
+                "pending": pending.get(service.id),
+                # 已退网业务：隐藏续签 / 退网按钮（回收入口在设备表）。
+                "retired": scans._is_retired_service(service, day_start),
             }
         )
     return rows
@@ -412,7 +521,11 @@ def list_due_renewal_rows(
 def list_recycle_device_rows(
     db: Session, now: datetime | None = None, timezone_name: str | None = None
 ) -> list[dict]:
-    """退网未回收设备行：复用 scans 的退网业务判定与回收状态判定。"""
+    """退网未回收设备行：复用 scans 的退网业务判定与回收状态判定。
+
+    已回收设备不进入列表（自然不出现回收按钮）；每行带待审核申请与历史
+    通知次数（source=device_recycle 且 device_id 匹配）。
+    """
 
     settings = get_settings()
     tz = timezone_name or settings.default_timezone
@@ -444,4 +557,12 @@ def list_recycle_device_rows(
                     "maintenance_name": maintenance_name,
                 }
             )
+    device_ids = {row["device"].id for row in rows}
+    pending = _pending_change_map(db, "NetworkDevice", device_ids)
+    notify_counts = _notification_count_map(
+        db, scans.SOURCE_DEVICE_RECYCLE, "device_id", device_ids
+    )
+    for row in rows:
+        row["pending"] = pending.get(row["device"].id)
+        row["notify_count"] = notify_counts.get(row["device"].id, 0)
     return rows
