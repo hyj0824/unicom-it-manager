@@ -126,6 +126,8 @@ class ScanSchedule(TimestampMixin, Base):
     # 提前天数：到期前 N 天进入通知范围。
     lead_days: Mapped[int] = mapped_column(Integer, default=14, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # 到期维系/设备回收/审核卡单提醒生成任务时是否同步入队短信通知。
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
@@ -211,6 +213,34 @@ class CallEvent(Base):
         super().__init__(**kwargs)
 
     call_record: Mapped[CallRecord] = relationship(back_populates="events")
+
+
+class SmsNotification(Base):
+    """短信通知记录：扫描生成待发项，CallWorker 空闲时经 A7670E 串口发送。
+
+    单通道约束：短信与语音共用同一个串口，发送由 Worker 串行处理，不与
+    拨号并发；status: pending / sent / failed。
+    """
+
+    __tablename__ = "sms_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    call_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("call_tasks.id"), index=True
+    )
+    phone: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), default="pending", nullable=False, index=True
+    )
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    call_task: Mapped[CallTask | None] = relationship()
 
 
 class AppSetting(Base):
