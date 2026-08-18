@@ -9,6 +9,8 @@ from __future__ import annotations
 - 回收申请 → 应用后 recovery_status 为「已回收」；
 - 版本冲突：提交后再改业务 → 应用抛 ChangeApplicationError；
 - 工作台列表：到期窗口、今日已通知、退网未回收设备判定；
+- 防重复申请：submitted / approved 未应用时行级隐藏按钮、提交被拒，应用后可再次申请；
+- 通知次数统计（due_renewal / device_recycle 历史任务数）与 review_stuck 表单提示。
 - Web 路由：未登录 303、合法提交 303 且落库、非法日期 400。
 
 全部使用临时 SQLite + alembic head，不接触 data/app.db，不访问真实硬件。
@@ -38,6 +40,7 @@ from app.models import (
     CustomerContact,
     NetworkDevice,
     Script,
+    utcnow,
 )
 from app.services import change_requests
 from app.services.change_requests import (
@@ -45,6 +48,7 @@ from app.services.change_requests import (
     business_snapshot_patch,
     list_due_renewal_rows,
     list_recycle_device_rows,
+    pending_change_for,
     submit_business_update,
     submit_device_recovery,
 )
@@ -619,3 +623,312 @@ def test_recover_submit_creates_network_change_set(web_client) -> None:
         patch = json.loads(item.patch_json)
         assert patch["service_number"] == "848DIAWEB3001"
         assert patch["device"]["recovery_status"] == "已回收"
+
+
+# ---------------------------------------------------------------- 防重复申请
+
+
+def test_pending_change_blocks_duplicate_business_submit(db: Session) -> None:
+    """submitted 未处理时：pending 命中、再次提交被拒、工作台行标记 pending。"""
+
+    customer = _make_customer(db)
+    service = _make_service(
+        db, customer, "848DIA400001",
+        expires_at=datetime(2026, 8, 25, 0, 0, tzinfo=ZoneInfo(TZ)),
+    )
+    db.commit()
+
+    first = submit_business_update(
+        db, service, {"agreement_expires_at": "2099-12-31"}, "第一次续签", 11
+    )
+    db.commit()
+    assert pending_change_for(db, "BusinessService", service.id) is first
+
+    with pytest.raises(ValueError, match="已有待审核的申请"):
+        submit_business_update(
+            db, service, {"agreement_expires_at": "2099-12-31"}, "重复续签", 11
+        )
+    db.rollback()
+
+    rows = list_due_renewal_rows(db, now=NOW)
+    row = next(r for r in rows if r["service"].id == service.id)
+    assert row["pending"] is first
+    assert row["retired"] is False
+
+
+def test_approved_not_applied_also_blocks_duplicate(db: Session) -> None:
+    """approved 但未应用时同样视为待处理，阻止再次申请。"""
+
+    customer = _make_customer(db)
+    service = _make_service(
+        db, customer, "848DIA400002",
+        expires_at=datetime(2026, 8, 25, 0, 0, tzinfo=ZoneInfo(TZ)),
+    )
+    db.commit()
+
+    change_set = submit_business_update(
+        db, service, {"agreement_expires_at": "2099-12-31"}, "续签", 11
+    )
+    db.commit()
+    change_set.status = "approved"
+    db.commit()
+
+    assert pending_change_for(db, "BusinessService", service.id) is change_set
+    with pytest.raises(ValueError, match="已有待审核的申请"):
+        submit_business_update(
+            db, service, {"service_status": RETIRE_STATUS_LABEL}, "退网", 11
+        )
+    db.rollback()
+
+
+def test_applied_application_allows_resubmit(db: Session) -> None:
+    """应用后 pending 清空，可再次提交申请。"""
+
+    customer = _make_customer(db)
+    service = _make_service(
+        db, customer, "848DIA400003",
+        expires_at=datetime(2026, 8, 25, 0, 0, tzinfo=ZoneInfo(TZ)),
+    )
+    db.commit()
+
+    change_set = submit_business_update(
+        db, service, {"agreement_expires_at": "2026-10-01"}, "续签", 11
+    )
+    db.commit()
+    _approve_and_apply(db, change_set, 22)
+    db.commit()
+
+    assert pending_change_for(db, "BusinessService", service.id) is None
+    second = submit_business_update(
+        db, service, {"agreement_expires_at": "2099-12-31"}, "再次续签", 11
+    )
+    db.commit()
+    assert second.id != change_set.id
+
+
+def test_pending_change_matches_import_style_entity_type(db: Session) -> None:
+    """导入批次变更项（entity_type="business_service"）同样阻止重复申请。"""
+
+    customer = _make_customer(db)
+    service = _make_service(db, customer, "848DIA400005", expires_at=None)
+    db.commit()
+
+    change_set = ChangeSet(
+        title="导入批次 #1：业务台账",
+        domain="business",
+        status="submitted",
+        reason="由扁平台账导入生成",
+        submitted_at=utcnow(),
+    )
+    db.add(change_set)
+    db.flush()
+    db.add(
+        ChangeItem(
+            change_set_id=change_set.id,
+            entity_type="business_service",
+            entity_id=service.id,
+            operation="update",
+            base_version=service.version,
+            patch_json="{}",
+        )
+    )
+    db.commit()
+
+    assert pending_change_for(db, "BusinessService", service.id) is change_set
+    with pytest.raises(ValueError, match="已有待审核的申请"):
+        submit_business_update(
+            db, service, {"agreement_expires_at": "2099-12-31"}, "续签", 11
+        )
+    db.rollback()
+
+
+def test_pending_blocks_duplicate_device_recovery(db: Session) -> None:
+    """设备有待审核回收申请时：提交被拒、回收行标记 pending。"""
+
+    customer = _make_customer(db)
+    service = _make_service(
+        db, customer, "848DIA400004",
+        expires_at=datetime(2026, 1, 1, 0, 0, tzinfo=ZoneInfo(TZ)),  # 已过期 → 退网
+    )
+    device = _make_device(db, service, "210000RC20", recovery_status_label=None)
+    db.commit()
+
+    change_set = submit_device_recovery(db, device, "设备已回收入库", 11)
+    db.commit()
+    assert pending_change_for(db, "NetworkDevice", device.id) is change_set
+
+    with pytest.raises(ValueError, match="已有待审核的申请"):
+        submit_device_recovery(db, device, "重复提交", 11)
+    db.rollback()
+
+    rows = list_recycle_device_rows(db, now=NOW)
+    row = next(r for r in rows if r["device"].id == device.id)
+    assert row["pending"] is change_set
+    assert row["device"].recovery_status_item is None  # 未回收才进入列表
+
+
+# ---------------------------------------------------------------- 通知次数统计
+
+
+def test_notify_counts_reflect_scan_task_history(db: Session) -> None:
+    """「已通知次数」= source 匹配且 meta 目标 id 匹配的历史任务数。"""
+
+    customer = _make_customer(db)
+    first = _make_service(
+        db, customer, "848DIA400010",
+        expires_at=datetime(2026, 8, 25, 0, 0, tzinfo=ZoneInfo(TZ)),
+    )
+    second = _make_service(
+        db, customer, "848DIA400011",
+        expires_at=datetime(2026, 8, 26, 0, 0, tzinfo=ZoneInfo(TZ)),
+    )
+    retired = _make_service(db, customer, "848DIA400012", status_label="主动退网(申请拆机)")
+    device_a = _make_device(db, retired, "210000RC21", recovery_status_label=None)
+    device_b = _make_device(db, retired, "210000RC22", recovery_status_label=None)
+    db.commit()
+
+    script = Script(title="扫描话术", body="通知")
+    db.add(script)
+    db.flush()
+
+    def _task(source: str, meta: dict) -> None:
+        db.add(
+            CallTask(
+                customer_id=customer.id,
+                script_id=script.id,
+                due_at=NOW,
+                source=source,
+                meta_json=json.dumps(meta),
+            )
+        )
+
+    _task("due_renewal", {"business_service_id": first.id})
+    _task("due_renewal", {"business_service_id": first.id})
+    _task("due_renewal", {"business_service_id": second.id})
+    _task("due_renewal", {"business_service_id": 9999})  # 不相关目标不计入
+    _task("due_renewal", {"device_id": first.id})  # 键不匹配不计入
+    _task("device_recycle", {"device_id": device_a.id})
+    _task("device_recycle", {"device_id": device_a.id})
+    _task("device_recycle", {"device_id": device_b.id})
+    db.commit()
+
+    rows = list_due_renewal_rows(db, now=NOW)
+    by_number = {row["service"].service_number: row for row in rows}
+    assert by_number["848DIA400010"]["notify_count"] == 2
+    assert by_number["848DIA400011"]["notify_count"] == 1
+    # 历史计数不影响「今日通知」列（任务 created_at 不在当天窗口内）。
+    assert by_number["848DIA400010"]["notified_today"] is False
+
+    device_rows = list_recycle_device_rows(db, now=NOW)
+    by_code = {row["device"].device_code: row for row in device_rows}
+    assert by_code["210000RC21"]["notify_count"] == 2
+    assert by_code["210000RC22"]["notify_count"] == 1
+    assert by_code["210000RC21"]["pending"] is None
+
+
+# ---------------------------------------------------------------- 工作台 Web：防重复与已退网展示
+
+
+def test_due_work_pending_hides_buttons_and_blocks_submit(web_client) -> None:
+    client, webdb = web_client
+    service_id = _web_service(webdb, "848DIAWEB4001", days_from_today=5)
+    _login(client)
+
+    response = client.post(
+        f"/due-work/business/{service_id}/renew",
+        data={"agreement_expires_at": "2099-12-31", "reason": "客户确认续签一年"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    page = client.get("/due-work").text
+    assert "已有申请待审核" in page
+    assert f"/due-work/business/{service_id}/renew" not in page
+    assert f"/due-work/business/{service_id}/retire" not in page
+
+    denied = client.post(
+        f"/due-work/business/{service_id}/renew",
+        data={"agreement_expires_at": "2099-12-31", "reason": "重复提交"},
+        follow_redirects=False,
+    )
+    assert denied.status_code == 400
+    assert "已有待审核的申请" in denied.text
+
+    with webdb() as db:
+        assert len(db.scalars(select(ChangeSet)).all()) == 1
+
+
+def test_retired_business_hides_renew_and_retire_buttons(web_client) -> None:
+    """退网申请应用后：业务行不再显示续签 / 退网按钮，改为「已退网」标记。"""
+
+    client, webdb = web_client
+    service_id = _web_service(webdb, "848DIAWEB4003", days_from_today=5)
+    _login(client)
+
+    response = client.post(
+        f"/due-work/business/{service_id}/retire",
+        data={"reason": "客户确认不续签，申请拆机"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    with webdb() as db:
+        change_set = db.scalars(
+            select(ChangeSet).order_by(ChangeSet.id.desc()).limit(1)
+        ).one()
+        change_set.status = "approved"
+        db.flush()
+        apply_change_set(db, change_set, 22)
+        db.commit()
+
+    page = client.get("/due-work").text
+    assert "已退网" in page
+    assert f"/due-work/business/{service_id}/renew" not in page
+    assert f"/due-work/business/{service_id}/retire" not in page
+
+
+def test_recover_button_hidden_when_device_application_pending(web_client) -> None:
+    client, webdb = web_client
+    with webdb() as db:
+        customer = _make_customer(db, "Web客户-848DIAWEB4002")
+        _add_contact(db, customer, "王五", "13700000002", "网络维护责任人")
+        expired = datetime.combine(
+            (datetime.now(ZoneInfo(TZ)) - timedelta(days=30)).date(),
+            time.min,
+            tzinfo=ZoneInfo(TZ),
+        )
+        service = _make_service(db, customer, "848DIAWEB4002", expires_at=expired)
+        device = _make_device(db, service, "210000WEB02", recovery_status_label=None)
+        db.commit()
+        device_id = device.id
+
+    _login(client)
+    response = client.post(
+        f"/due-work/device/{device_id}/recover",
+        data={"reason": "设备已回收入库"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    page = client.get("/due-work").text
+    assert "已有申请待审核" in page
+    assert f"/due-work/device/{device_id}/recover" not in page
+
+    denied = client.post(
+        f"/due-work/device/{device_id}/recover",
+        data={"reason": "重复提交"},
+        follow_redirects=False,
+    )
+    assert denied.status_code == 400
+    assert "已有待审核的申请" in denied.text
+
+
+# ---------------------------------------------------------------- review_stuck 表单提示
+
+
+def test_scan_schedules_shows_review_stuck_lead_days_note(web_client) -> None:
+    """扫描通知配置页：审核卡单提醒类型不使用提前天数的说明文字存在。"""
+
+    client, webdb = web_client
+    _login(client)
+    page = client.get("/scan-schedules").text
+    assert "审核卡单提醒不使用提前天数" in page
