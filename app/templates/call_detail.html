@@ -26,23 +26,23 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h2>任务与计划</h2>
+        <h2>任务与来源</h2>
       </div>
       <dl class="detail-list">
         {% if record.task %}
           <dt>任务</dt><dd><a class="text-link" href="/calls#task-{{ record.task.id }}">#{{ record.task.id }}</a></dd>
           <dt>任务状态</dt><dd><span class="status-pill {{ record.task.status }}">{{ record.task.status|status_label }}</span></dd>
           <dt>尝试</dt><dd>{{ record.task.attempt }}/{{ record.task.max_attempts }}</dd>
-          <dt>来源</dt><dd>{{ "立即拨打" if record.task.source == "manual" else "计划触发" }}</dd>
+          <dt>来源</dt><dd>{{ record.task.source|source_label }}</dd>
           <dt>入队时间</dt><dd>{{ record.task.created_at|dt_s }}</dd>
         {% else %}
           <dt>任务</dt><dd>-</dd>
         {% endif %}
+        {% if record.task and record.task.scan_schedule %}
+          <dt>扫描配置</dt><dd><a class="text-link" href="/scan-schedules?edit_id={{ record.task.scan_schedule.id }}">#{{ record.task.scan_schedule.id }} · {{ record.task.scan_schedule.name }}</a></dd>
+        {% endif %}
         {% if record.plan %}
-          <dt>回访计划</dt><dd><a class="text-link" href="/plans?edit_id={{ record.plan.id }}">#{{ record.plan.id }} · {{ record.plan.customer.name }}</a></dd>
-          <dt>触发规则</dt><dd>{{ "单次" if record.plan.trigger_type == "once" else "周期" }}{% if record.plan.cron_expr %}<span class="subtle mono"> {{ record.plan.cron_expr }}</span>{% endif %}</dd>
-        {% else %}
-          <dt>回访计划</dt><dd>-（手动发起，不关联计划）</dd>
+          <dt>回访计划（历史）</dt><dd>#{{ record.plan.id }} · {{ record.plan.customer.name }}</dd>
         {% endif %}
         <dt>重拨操作</dt>
         <dd>

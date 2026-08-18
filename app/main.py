@@ -34,7 +34,6 @@ from .models import (
     CallEvent,
     CallRecord,
     CallTask,
-    CallbackPlan,
     ChangeSet,
     Contact,
     Customer,
@@ -44,6 +43,7 @@ from .models import (
     NetworkDevice,
     Role,
     RolePermission,
+    ScanSchedule,
     Script,
     StagingRow,
     User,
@@ -119,6 +119,20 @@ DOMAIN_LABELS = {
     "system": "系统",
 }
 
+# 扫描通知配置的扫描类型（app/models.py ScanSchedule.scan_type）。
+SCAN_TYPE_LABELS = {
+    "due_renewal": "到期维系",
+    "device_recycle": "设备回收",
+}
+
+# 通知任务来源（CallTask.source）；历史 callback_plans 生成的任务仍为 scheduled。
+SOURCE_LABELS = {
+    "manual": "立即拨打",
+    "due_renewal": "到期维系扫描",
+    "device_recycle": "设备回收扫描",
+    "scheduled": "计划触发",
+}
+
 
 def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
@@ -172,12 +186,6 @@ def html_date_value(value: object) -> str:
     return text
 
 
-def datetime_local_filter(value: datetime | None, timezone_name: str | None = None) -> str:
-    return plan_service.datetime_local_value(
-        value, timezone_name or settings.default_timezone
-    )
-
-
 def from_json_map(value: str, key: str) -> str:
     try:
         data = json.loads(value or "{}")
@@ -195,13 +203,22 @@ def domain_label(value: str) -> str:
     return DOMAIN_LABELS.get(value, value or "-")
 
 
+def source_label(value: str) -> str:
+    return SOURCE_LABELS.get(value, value or "-")
+
+
+def scan_type_label(value: str) -> str:
+    return SCAN_TYPE_LABELS.get(value, value or "-")
+
+
 templates.env.filters["dt"] = format_dt
 templates.env.filters["dt_s"] = format_dt_seconds
 templates.env.filters["date"] = format_date
-templates.env.filters["datetime_local"] = datetime_local_filter
 templates.env.filters["from_json_map"] = from_json_map
 templates.env.filters["status_label"] = status_label
 templates.env.filters["domain_label"] = domain_label
+templates.env.filters["source_label"] = source_label
+templates.env.filters["scan_type_label"] = scan_type_label
 templates.env.filters["script_audio_url"] = script_audio_url
 
 
@@ -372,20 +389,9 @@ def logout_submit(request: Request):
 @app.get("/")
 def dashboard(request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
-    zone = plan_service.get_zone(settings.default_timezone)
-    today = datetime.now(zone).date()
-    today_start = datetime.combine(today, time.min, tzinfo=zone).astimezone(timezone.utc)
-    today_end = datetime.combine(today, time.max, tzinfo=zone).astimezone(timezone.utc)
     now = utcnow()
     expiring_soon = now + timedelta(days=30)
 
-    due_today = db.scalar(
-        select(func.count(CallbackPlan.id)).where(
-            CallbackPlan.enabled.is_(True),
-            CallbackPlan.next_run_at >= today_start,
-            CallbackPlan.next_run_at <= today_end,
-        )
-    ) or 0
     active_task = db.scalars(
         select(CallTask)
         .where(CallTask.status.in_(["queued", "dialing", "connected"]))
@@ -417,9 +423,12 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             select(func.count(NetworkDevice.id)).where(NetworkDevice.is_active.is_(True))
         ) or 0,
         "customers": db.scalar(select(func.count(Customer.id))) or 0,
-        "plans": db.scalar(select(func.count(CallbackPlan.id))) or 0,
+        "scan_schedules": db.scalar(select(func.count(ScanSchedule.id))) or 0,
         "records": db.scalar(select(func.count(CallRecord.id))) or 0,
     }
+    scan_enabled = db.scalar(
+        select(func.count(ScanSchedule.id)).where(ScanSchedule.enabled.is_(True))
+    ) or 0
     recent_records = db.scalars(
         select(CallRecord).order_by(CallRecord.created_at.desc()).limit(8)
     ).all()
@@ -436,11 +445,11 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         request,
         "dashboard.html",
         db,
-        due_today=due_today,
         active_task=active_task,
         pending_reviews=pending_reviews,
         missing_total=missing_total,
         expiring_services=expiring_services,
+        scan_enabled=scan_enabled,
         call_stats=call_stats,
         counts=counts,
         recent_records=recent_records,
@@ -1734,7 +1743,12 @@ def script_delete(script_id: int, request: Request, db: Session = Depends(get_db
     refs = script_referencing_counts(db, script)
     if any(refs.values()):
         parts = []
-        for label, key in [("回访计划", "plans"), ("外呼任务", "tasks"), ("通话记录", "records")]:
+        for label, key in [
+            ("扫描配置", "schedules"),
+            ("回访计划", "plans"),
+            ("外呼任务", "tasks"),
+            ("通话记录", "records"),
+        ]:
             if refs[key]:
                 parts.append(f"{label} {refs[key]} 条")
         return scripts_template(
@@ -1751,7 +1765,7 @@ def script_delete(script_id: int, request: Request, db: Session = Depends(get_db
         return scripts_template(
             request,
             db,
-            "该话术被计划或通话记录引用，不能删除。",
+            "该话术被其他数据引用，不能删除。",
             status_code=400,
         )
     return redirect_to("/scripts")
@@ -1777,165 +1791,152 @@ def script_audio_file(filename: str, request: Request):
     return FileResponse(path, media_type=media_type)
 
 
-# ---------------------------------------------------------------- 回访计划
+# ---------------------------------------------------------------- 扫描通知配置
 
 
-def plans_template(
+def scan_schedules_template(
     request: Request,
     db: Session,
     error: str = "",
     notice: str = "",
-    next_run_preview: datetime | None = None,
     form_data: dict[str, str] | None = None,
-    edit_plan: CallbackPlan | None = None,
+    edit_schedule: ScanSchedule | None = None,
     status_code: int = 200,
 ):
-    plans = db.scalars(select(CallbackPlan).order_by(CallbackPlan.created_at.desc())).all()
-    customers = db.scalars(select(Customer).order_by(Customer.name.asc())).all()
+    schedules = db.scalars(
+        select(ScanSchedule).order_by(ScanSchedule.created_at.desc())
+    ).all()
     scripts = db.scalars(select(Script).order_by(Script.title.asc())).all()
-    contacts = db.scalars(select(Contact).where(Contact.is_active.is_(True)).order_by(Contact.name.asc(), Contact.id.asc())).all()
     return render(
         request,
-        "plans.html",
+        "scan_schedules.html",
         db,
         status_code=status_code,
-        plans=plans,
-        customers=customers,
+        schedules=schedules,
         scripts=scripts,
-        contacts=contacts,
-        edit_plan=edit_plan,
+        edit_schedule=edit_schedule,
         form_data=form_data or {},
         error=error,
         notice=notice,
-        next_run_preview=next_run_preview,
     )
 
 
-def _parse_plan_form(db: Session, form) -> tuple[Customer, Script, Contact, str, datetime | None, str, str, bool]:
-    customer_id = _form_int(form, "customer_id")
-    if not customer_id:
-        raise ValueError("请选择客户主体。")
-    customer = get_or_404(db, Customer, customer_id)
+def _parse_scan_schedule_form(db: Session, form) -> dict:
+    name = str(form.get("name", "")).strip()
+    if not name:
+        raise ValueError("扫描配置名称不能为空。")
+    scan_type = str(form.get("scan_type", "")).strip()
+    if scan_type not in SCAN_TYPE_LABELS:
+        raise ValueError("扫描类型无效：应为「到期维系」或「设备回收」。")
     script_id = _form_int(form, "script_id")
-    if not script_id:
-        raise ValueError("请选择话术。")
-    script = get_or_404(db, Script, script_id)
-    contact_id = _form_int(form, "contact_id")
-    if not contact_id:
-        raise ValueError("请选择拨打负责人。")
-    contact = get_or_404(db, Contact, contact_id)
-    if not contact.is_active or not contact.phone:
-        raise ValueError("请选择一位有有效联系电话的通讯录人员。")
-    trigger_type = str(form.get("trigger_type", "once")).strip()
-    timezone_name = str(form.get("timezone", settings.default_timezone)).strip() or settings.default_timezone
-    run_at = plan_service.parse_datetime_local(str(form.get("run_at", "")), timezone_name)
+    if script_id is not None and db.get(Script, script_id) is None:
+        raise ValueError("所选话术模板不存在。")
     cron_expr = str(form.get("cron_expr", "")).strip()
+    timezone_name = str(form.get("timezone", "")).strip() or settings.default_timezone
+    plan_service.validate_cron_expr(cron_expr, timezone_name)
+    lead_days_raw = str(form.get("lead_days", "")).strip()
+    if lead_days_raw:
+        try:
+            lead_days = int(lead_days_raw)
+        except ValueError as exc:
+            raise ValueError("提前天数必须是整数（例如 14）。") from exc
+    else:
+        lead_days = 14
+    if lead_days < 0:
+        raise ValueError("提前天数不能为负数。")
     enabled = str(form.get("enabled", "")) == "on"
-    return customer, script, contact, trigger_type, run_at, cron_expr, timezone_name, enabled
+    return {
+        "name": name,
+        "scan_type": scan_type,
+        "script_id": script_id,
+        "cron_expr": cron_expr,
+        "timezone": timezone_name,
+        "lead_days": lead_days,
+        "enabled": enabled,
+    }
 
 
-@app.get("/plans")
-def plans_page(
+@app.get("/scan-schedules")
+def scan_schedules_page(
     request: Request,
     edit_id: int | None = None,
     notice: str = "",
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
-    edit_plan = db.get(CallbackPlan, edit_id) if edit_id else None
-    return plans_template(request, db, edit_plan=edit_plan, notice=notice)
+    edit_schedule = db.get(ScanSchedule, edit_id) if edit_id else None
+    return scan_schedules_template(request, db, edit_schedule=edit_schedule, notice=notice)
 
 
-@app.post("/plans")
-async def plan_create(request: Request, db: Session = Depends(get_db)):
+@app.post("/scan-schedules")
+async def scan_schedule_create(request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
     form = await request.form()
-    next_preview: datetime | None = None
     try:
-        customer, script, contact, trigger_type, run_at, cron_expr, timezone_name, enabled = _parse_plan_form(db, form)
-        # 先算下次执行时间再落库：校验不通过时，表单页仍可展示合法输入的预览。
-        next_preview = plan_service.compute_next_run_at(
-            trigger_type, run_at, cron_expr, timezone_name
-        )
-        plan_service.create_plan(db, customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled, contact)
-    except (ValueError, HTTPException) as exc:
-        if isinstance(exc, HTTPException):
-            raise
-        return plans_template(
-            request, db, str(exc), next_run_preview=next_preview, form_data=dict(form), status_code=400
-        )
-    db.commit()
-    notice = f"计划已保存，下次执行时间：{format_dt(next_preview, timezone_name)}（{timezone_name}）。"
-    return redirect_to(f"/plans?notice={quote(notice)}")
-
-
-@app.post("/plans/{plan_id}/edit")
-async def plan_update(plan_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
-    plan = get_or_404(db, CallbackPlan, plan_id)
-    form = await request.form()
-    next_preview: datetime | None = None
-    try:
-        customer, script, contact, trigger_type, run_at, cron_expr, timezone_name, enabled = _parse_plan_form(db, form)
-        next_preview = plan_service.compute_next_run_at(
-            trigger_type, run_at, cron_expr, timezone_name
-        )
-        plan_service.update_plan(plan, customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled, contact)
+        data = _parse_scan_schedule_form(db, form)
     except ValueError as exc:
-        return plans_template(
-            request, db, str(exc), next_run_preview=next_preview, form_data=dict(form), edit_plan=plan, status_code=400
+        return scan_schedules_template(
+            request, db, str(exc), form_data=dict(form), status_code=400
         )
+    db.add(ScanSchedule(**data))
     db.commit()
-    notice = f"计划已保存，下次执行时间：{format_dt(next_preview, timezone_name)}（{timezone_name}）。"
-    return redirect_to(f"/plans?edit_id={plan.id}&notice={quote(notice)}")
+    return redirect_to(f"/scan-schedules?notice={quote('扫描配置已创建。')}")
 
 
-@app.post("/plans/{plan_id}/delete")
-def plan_delete(plan_id: int, request: Request, db: Session = Depends(get_db)):
+@app.post("/scan-schedules/{schedule_id}/edit")
+async def scan_schedule_update(schedule_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
-    plan = get_or_404(db, CallbackPlan, plan_id)
+    schedule = get_or_404(db, ScanSchedule, schedule_id)
+    form = await request.form()
     try:
-        db.delete(plan)
+        data = _parse_scan_schedule_form(db, form)
+    except ValueError as exc:
+        return scan_schedules_template(
+            request, db, str(exc), form_data=dict(form), edit_schedule=schedule, status_code=400
+        )
+    for key, value in data.items():
+        setattr(schedule, key, value)
+    db.commit()
+    notice = f"扫描配置「{schedule.name}」已保存。"
+    return redirect_to(f"/scan-schedules?edit_id={schedule.id}&notice={quote(notice)}")
+
+
+@app.post("/scan-schedules/{schedule_id}/delete")
+def scan_schedule_delete(schedule_id: int, request: Request, db: Session = Depends(get_db)):
+    auth.require_login(request)
+    schedule = get_or_404(db, ScanSchedule, schedule_id)
+    # SQLite 默认不强制外键，显式检查引用，避免删除仍被任务引用的配置。
+    task_refs = db.scalar(
+        select(func.count(CallTask.id)).where(CallTask.scan_schedule_id == schedule.id)
+    ) or 0
+    if task_refs:
+        return scan_schedules_template(
+            request,
+            db,
+            f"该扫描配置已生成 {task_refs} 条通知任务，不能删除；如需停止扫描请先停用。",
+            status_code=400,
+        )
+    try:
+        db.delete(schedule)
         db.commit()
     except IntegrityError:
         db.rollback()
-        return plans_template(
+        return scan_schedules_template(
             request,
             db,
-            "该计划被排队任务或通话记录引用，不能删除。",
+            "该扫描配置被其他数据引用，不能删除；如需停止扫描请先停用。",
             status_code=400,
         )
-    return redirect_to("/plans")
+    return redirect_to("/scan-schedules")
 
 
-@app.post("/plans/{plan_id}/toggle")
-def plan_toggle(plan_id: int, request: Request, db: Session = Depends(get_db)):
+@app.post("/scan-schedules/{schedule_id}/toggle")
+def scan_schedule_toggle(schedule_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
-    plan = get_or_404(db, CallbackPlan, plan_id)
-    plan.enabled = not plan.enabled
+    schedule = get_or_404(db, ScanSchedule, schedule_id)
+    schedule.enabled = not schedule.enabled
     db.commit()
-    return redirect_to("/plans")
-
-
-@app.post("/plans/{plan_id}/call-now")
-def plan_call_now(plan_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
-    plan = get_or_404(db, CallbackPlan, plan_id)
-    plan_service.create_call_task(
-        db,
-        plan,
-        due_at=utcnow(),
-        status="queued",
-        message="网页端发起立即拨打。",
-        source="manual",
-    )
-    ledger_service.log_action(
-        db, "dial", _user_id(request), "callback_plan", plan.id,
-        json.dumps({"action": "call_now"}, ensure_ascii=False),
-        _client_ip(request),
-    )
-    db.commit()
-    return redirect_to("/calls?notice=" + quote("已生成立即拨打任务，请到通话记录查看。"))
+    return redirect_to("/scan-schedules")
 
 
 # ---------------------------------------------------------------- 通话记录
@@ -1955,9 +1956,12 @@ def _date_filter_bound(value: str, day_start: bool) -> datetime | None:
     if len(value) == 10 and value[4] == "-" and value[7] == "-":
         value = f"{value}T{'00:00' if day_start else '23:59'}"
     try:
-        return plan_service.parse_datetime_local(value, settings.default_timezone)
+        parsed = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise ValueError(f"日期筛选格式不正确：{exc}") from exc
+        raise ValueError(f"日期筛选格式不正确：「{value}」") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=plan_service.get_zone(settings.default_timezone))
+    return parsed.astimezone(timezone.utc)
 
 
 @app.get("/calls")

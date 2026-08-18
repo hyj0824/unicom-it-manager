@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -21,23 +20,20 @@ from sqlalchemy.orm import sessionmaker
 from app.database import get_db
 from app.main import app
 from app.models import (
-    CallTask,
-    CallbackPlan,
     Contact,
     Customer,
     Permission,
     Role,
     RolePermission,
+    ScanSchedule,
     Script,
     User,
     UserRole,
 )
-from app.services import plans as plan_service
 from app.services.settings import is_scheduler_enabled
 from app.services.users import hash_password
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-UTC = timezone.utc
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "test-admin-password")
 
 
@@ -166,8 +162,7 @@ def test_system_read_permission_only_allows_monitor_logs(client: TestClient, web
 
 
 def seed_basics(client: TestClient, webdb, name: str) -> dict[str, int]:
-    """创建客户主体/话术/联系人，返回 id 供计划表单使用。"""
-    # 客户主体由台账导入审核链路维护，Web 不再提供客户表单；测试直接建主数据。
+    """创建话术/联系人，返回 id 供扫描配置等表单使用。"""
     with webdb() as db:
         db.add(Customer(name=name, notes=""))
         db.commit()
@@ -185,20 +180,34 @@ def seed_basics(client: TestClient, webdb, name: str) -> dict[str, int]:
         }
 
 
+def _scan_schedule_data(ids: dict[str, int], **overrides) -> dict:
+    data = {
+        "name": "每日到期维系扫描",
+        "scan_type": "due_renewal",
+        "script_id": str(ids["script_id"]),
+        "cron_expr": "0 9 * * *",
+        "timezone": "Asia/Shanghai",
+        "lead_days": "14",
+        "enabled": "on",
+    }
+    data.update({key: str(value) for key, value in overrides.items()})
+    return data
+
+
 # ---------------------------------------------------------------- 登录保护
 
 
 def test_unauthenticated_requests_redirect_to_login(client: TestClient) -> None:
     for method, path in [
         ("GET", "/"),
-        ("GET", "/plans"),
+        ("GET", "/scan-schedules"),
         ("GET", "/scripts"),
         ("GET", "/calls"),
         ("GET", "/admin/system"),
         ("GET", "/imports"),
         ("POST", "/contacts"),
         ("POST", "/scripts"),
-        ("POST", "/plans"),
+        ("POST", "/scan-schedules"),
         ("POST", "/settings/scheduler"),
     ]:
         resp = client.request(method, path, follow_redirects=False)
@@ -239,7 +248,7 @@ def test_login_redirects_and_pages_render(client: TestClient) -> None:
     for path in [
         "/",
         "/contacts",
-        "/plans",
+        "/scan-schedules",
         "/scripts",
         "/calls",
         "/ledger",
@@ -300,140 +309,134 @@ def test_contact_form_validation(client: TestClient) -> None:
     assert resp.status_code == 303
 
 
-def test_plan_form_validation(client: TestClient, webdb) -> None:
+def test_scan_schedule_form_validation(client: TestClient, webdb) -> None:
     login(client)
     ids = seed_basics(client, webdb, "客户丙")
-    base = {
-        "customer_id": str(ids["customer_id"]),
-        "script_id": str(ids["script_id"]),
-        "contact_id": str(ids["contact_id"]),
-        "trigger_type": "once",
-        "timezone": "Asia/Shanghai",
-    }
 
-    # 未选择联系人（占位值 0 视为未选择）→ 400，提示选择负责人。
-    resp = client.post("/plans", data={**base, "contact_id": "0", "run_at": "2026-01-15T10:30"})
+    # 名称为空 → 400。
+    resp = client.post("/scan-schedules", data=_scan_schedule_data(ids, name=" "))
     assert resp.status_code == 400
-    assert "请选择拨打负责人" in resp.text
+    assert "名称不能为空" in resp.text
 
-    # 联系人的联系电话为空 → 400。
-    with webdb() as db:
-        phone_less = Contact(name="无电话", phone="")
-        db.add(phone_less)
-        db.commit()
-        contact_id = phone_less.id
+    # 无效 scan_type → 400。
     resp = client.post(
-        "/plans", data={**base, "contact_id": str(contact_id), "run_at": "2026-01-15T10:30"}
+        "/scan-schedules", data=_scan_schedule_data(ids, scan_type="monthly")
     )
     assert resp.status_code == 400
-    assert "有效联系电话" in resp.text
+    assert "扫描类型无效" in resp.text
 
-    # once 计划缺少 run_at → 400。
-    resp = client.post("/plans", data={**base, "run_at": ""})
-    assert resp.status_code == 400
-    assert "必须填写执行时间" in resp.text
-
-    # 无效 trigger_type → 400。
+    # 无效 cron 表达式 → 400，提示明确。
     resp = client.post(
-        "/plans",
-        data={
-            **base,
-            "trigger_type": "monthly",
-            "run_at": "2026-01-15T10:30",
-        },
+        "/scan-schedules", data=_scan_schedule_data(ids, cron_expr="not a cron")
     )
     assert resp.status_code == 400
-    assert "trigger_type" in resp.text
+    assert "Cron 表达式「not a cron」无效" in resp.text
 
-    # 无效 cron 表达式 → 400。
+    # 无效时区 → 400。
     resp = client.post(
-        "/plans",
-        data={
-            **base,
-            "trigger_type": "cron",
-            "cron_expr": "not a cron",
-        },
+        "/scan-schedules", data=_scan_schedule_data(ids, timezone="Mars/Olympus")
     )
     assert resp.status_code == 400
+    assert "时区「Mars/Olympus」无效" in resp.text
+
+    # 提前天数非法 → 400。
+    resp = client.post(
+        "/scan-schedules", data=_scan_schedule_data(ids, lead_days="abc")
+    )
+    assert resp.status_code == 400
+    assert "提前天数必须是整数" in resp.text
+
+    # 不存在的 script_id → 400。
+    resp = client.post(
+        "/scan-schedules", data=_scan_schedule_data(ids, script_id="999999")
+    )
+    assert resp.status_code == 400
+    assert "话术模板不存在" in resp.text
 
 
-def test_plan_valid_submission_and_call_now(client: TestClient, webdb) -> None:
+def test_scan_schedule_valid_submission_edit_toggle_delete(client: TestClient, webdb) -> None:
     login(client)
     ids = seed_basics(client, webdb, "客户丁")
 
-    # 创建 once 计划（上海 2026-01-15 10:30）。
+    # 创建（可空话术 + 显式字段）。
     resp = client.post(
-        "/plans",
-        data={
-            "customer_id": str(ids["customer_id"]),
-            "script_id": str(ids["script_id"]),
-            "contact_id": str(ids["contact_id"]),
-            "trigger_type": "once",
-            "run_at": "2026-01-15T10:30",
-            "timezone": "Asia/Shanghai",
-            "enabled": "on",
-        },
+        "/scan-schedules",
+        data=_scan_schedule_data(
+            ids, name="设备回收扫描", scan_type="device_recycle", lead_days="7"
+        ),
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    resp = client.get("/plans")
-    assert resp.status_code == 200
-
     with webdb() as db:
-        plan = db.scalar(
-            select(CallbackPlan).where(CallbackPlan.customer_id == ids["customer_id"])
+        schedule = db.scalar(
+            select(ScanSchedule).where(ScanSchedule.name == "设备回收扫描")
         )
-        assert plan is not None
-        assert plan.trigger_type == "once"
-        # 上海 2026-01-15 10:30 = UTC 02:30。
-        assert plan_service.as_utc(plan.next_run_at) == datetime(2026, 1, 15, 2, 30, tzinfo=UTC)
+        assert schedule is not None
+        assert schedule.scan_type == "device_recycle"
+        assert schedule.script_id == ids["script_id"]
+        assert schedule.cron_expr == "0 9 * * *"
+        assert schedule.timezone == "Asia/Shanghai"
+        assert schedule.lead_days == 7
+        assert schedule.enabled is True
+        schedule_id = schedule.id
 
-        # 立即拨打：生成 queued 手动任务，不改变计划的下一次执行时间。
-        before = plan.next_run_at
-        resp = client.post(f"/plans/{plan.id}/call-now", follow_redirects=False)
-        assert resp.status_code == 303
-        db.expire_all()
-        plan = db.get(CallbackPlan, plan.id)
-        assert plan.next_run_at == before
-
-    with webdb() as db:
-        task = db.scalar(select(CallTask).where(CallTask.plan_id == plan.id))
-        assert task is not None
-        assert task.status == "queued"
-        assert task.source == "manual"
-        assert task.dial_number == "13800000000"
-
-    # 通话列表页展示任务。
-    resp = client.get("/calls")
+    # 列表页展示新配置。
+    resp = client.get("/scan-schedules")
     assert resp.status_code == 200
+    assert "设备回收扫描" in resp.text
+
+    # 编辑。
+    resp = client.post(
+        f"/scan-schedules/{schedule_id}/edit",
+        data=_scan_schedule_data(
+            ids, name="改名后的扫描", cron_expr="30 8 * * *", timezone="UTC", lead_days="3"
+        ),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    with webdb() as db:
+        schedule = db.get(ScanSchedule, schedule_id)
+        assert schedule.name == "改名后的扫描"
+        assert schedule.cron_expr == "30 8 * * *"
+        assert schedule.timezone == "UTC"
+        assert schedule.lead_days == 3
+
+    # 停用/启用。
+    resp = client.post(f"/scan-schedules/{schedule_id}/toggle", follow_redirects=False)
+    assert resp.status_code == 303
+    with webdb() as db:
+        assert db.get(ScanSchedule, schedule_id).enabled is False
+    resp = client.post(f"/scan-schedules/{schedule_id}/toggle", follow_redirects=False)
+    assert resp.status_code == 303
+    with webdb() as db:
+        assert db.get(ScanSchedule, schedule_id).enabled is True
+
+    # 删除。
+    resp = client.post(f"/scan-schedules/{schedule_id}/delete", follow_redirects=False)
+    assert resp.status_code == 303
+    with webdb() as db:
+        assert db.get(ScanSchedule, schedule_id) is None
 
 
-def test_plan_cron_submission(client: TestClient, webdb) -> None:
+def test_scan_schedule_cron_submission(client: TestClient, webdb) -> None:
     login(client)
     ids = seed_basics(client, webdb, "客户戊")
 
     resp = client.post(
-        "/plans",
-        data={
-            "customer_id": str(ids["customer_id"]),
-            "script_id": str(ids["script_id"]),
-            "contact_id": str(ids["contact_id"]),
-            "trigger_type": "cron",
-            "cron_expr": "0 9 * * *",
-            "timezone": "Asia/Shanghai",
-        },
+        "/scan-schedules",
+        data=_scan_schedule_data(ids, cron_expr="0 9 * * *", script_id=""),
         follow_redirects=False,
     )
     assert resp.status_code == 303
 
     with webdb() as db:
-        plan = db.scalar(
-            select(CallbackPlan).where(CallbackPlan.customer_id == ids["customer_id"])
+        schedule = db.scalar(
+            select(ScanSchedule).where(ScanSchedule.name == "每日到期维系扫描")
         )
-        assert plan is not None
-        assert plan.trigger_type == "cron"
-        assert plan.cron_expr == "0 9 * * *"
-        assert plan_service.as_utc(plan.next_run_at) > datetime.now(timezone.utc)
+        assert schedule is not None
+        assert schedule.cron_expr == "0 9 * * *"
+        # 未选择话术 → 使用内置默认模板。
+        assert schedule.script_id is None
 
 
 # ---------------------------------------------------------------- 暂停调度

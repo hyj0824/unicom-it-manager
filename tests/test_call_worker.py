@@ -12,8 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.audio import PlaybackResult
 from app.config import Settings
-from app.models import AppSetting, CallEvent, CallTask, Customer, Script, utcnow
-from app.services import plans as plan_service
+from app.models import AppSetting, CallEvent, CallRecord, CallTask, Customer, Script, utcnow
 from app.services.call_worker import CallWorker, CallWorkerService
 from app.services.settings import (
     CALL_WORKER_ENABLED_KEY,
@@ -134,9 +133,25 @@ def _make_task(
         script.wav_path = str(wav_path)
     db.add(script)
     db.flush()
-    plan = plan_service.create_plan(db, customer, script, "once", utcnow(), "", "Asia/Shanghai", True)
-    task = plan_service.create_call_task(db, plan, due_at=due_at, status="queued")
-    task.dial_number = phone
+    # 直接构造任务+通话记录：拨号号码可空（Worker 领取后按错误收尾）。
+    task = CallTask(
+        customer=customer,
+        script=script,
+        dial_number=phone,
+        due_at=due_at or utcnow(),
+        status="queued",
+        max_attempts=2,
+    )
+    db.add(task)
+    db.add(
+        CallRecord(
+            task=task,
+            customer=customer,
+            script=script,
+            dial_number=phone,
+            status="queued",
+        )
+    )
     db.commit()
     return task
 
@@ -273,7 +288,7 @@ def test_40s_end_without_begin_is_cancelled_or_failed(fake_modem, db, tmp_path) 
 def test_connect_timeout_is_no_answer(fake_modem, db, tmp_path) -> None:
     ctx, configure = fake_modem
     task = _make_task(db, tmp_path)
-    task.max_attempts = 1  # create_call_task 的 max_attempts 来自全局配置，这里直接置为 1
+    task.max_attempts = 1  # 上限来自全局配置，这里直接置为 1
     db.commit()
     configure(lines=[])  # 串口无任何上报，走应用层超时兜底
     ctx.modem  # noqa: B018 - 确保假串口已实例化
