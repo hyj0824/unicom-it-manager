@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -81,6 +82,7 @@ class Script(TimestampMixin, Base):
 
 class CallbackPlan(TimestampMixin, Base):
     __tablename__ = "callback_plans"
+    __table_args__ = (Index("ix_callback_plans_contact_id", "contact_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)

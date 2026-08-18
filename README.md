@@ -45,6 +45,18 @@ journalctl -u callback-demo-web -f   # 查看日志
 运行时开关再控制其实际工作状态。不要给 uvicorn 加 `--workers N`，也不要
 启动第二个服务实例（SQLite 单写者约束）。
 
+## 备份与灾备
+
+- 本地备份：Web 进程内定时线程按 `BACKUP_INTERVAL_HOURS`（默认 24）执行，
+  SQLite backup API 生成一致性快照，与 `data/imports/`、`data/audio/` 一起
+  打包为 `callback-backup-v1-<时间戳>-<随机>.zip`（含 manifest 与 SHA-256
+  校验），按 `BACKUP_RETENTION_DAYS` 保留本地副本。
+- 远端备份：配置 `BACKUP_WEBDAV_URL` / `BACKUP_WEBDAV_USERNAME` /
+  `BACKUP_WEBDAV_PASSWORD`（仅环境变量，不落库）后自动上传，远端旧包按
+  同样保留期清理（依赖服务支持 PROPFIND/DELETE）。
+- 管理入口：系统管理 → 备份管理（/admin/backups），可手动触发、下载本地
+  备份、查看历史；操作记录审计日志。详细配置见 `.env.example` 注释。
+
 ## Hardware smoke test
 
 ```bash

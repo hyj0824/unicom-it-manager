@@ -16,6 +16,10 @@
 - [x] 引入 Alembic：初始迁移建立完整新 schema（回访 + 用户权限 + 业务台账 +
   设备 + 联系人 + 字典 + 变更申请 + 暂存导入 + 审计），种子迁移预置字典、
   权限和五个岗位角色；旧开发库已丢弃重建，应用启动改为校验 schema 版本。
+- [x] 2026-08 推进（herdr + codex/pi 多 agent 协作）：完成 P0 重试恢复（遗留
+  任务回收 + 重启不补打）、P1 测试可靠性（154 项全绿）、后台操作体验、
+  系统监控鉴权、P1 备份与灾备（SQLite/WebDAV）、部署文档与 systemd 示例、
+  音频目录规范与试听。
 
 ## 后续：台账导入与审核链路
 
@@ -45,11 +49,13 @@
 - [x] 删除 `role_scopes` 模型与表，迁移现有数据库并更新预置角色权限。
 - [ ] 上线前人工处理示例台账中的 317 行阻断错误和 107 行设备归属冲突，复核缺项
   报告，并执行导出、回传、审核、应用、备份恢复全流程演练。
-- [ ] 增加导入上传、暂存更正、双域审核、自审二次确认和扁平导出的 Web 路由测试。
+- [x] 增加导入上传、暂存更正、双域审核、自审二次确认和扁平导出的 Web 路由测试
+  （tests/test_import_web.py）。
 
 ## P0：先完成硬件闭环
 
-- [ ] 在真实 `.env` 中设置强 `ADMIN_PASSWORD` 和随机 `SESSION_SECRET`。
+- [ ] 在真实 `.env` 中设置强 `ADMIN_PASSWORD`（`SESSION_SECRET` 已为随机
+  64 位；`ADMIN_PASSWORD` 当前为 8 位，操作者选择保持现状，上线前应人工轮换）。
 - [x] 核对 A7670E 实际 AT 串口，并确认 `MODEM_PORT=/dev/ttyUSB1` 配置正确（AT
   握手、CSQ 29、CPIN READY、CEREG 注册均正常）。
 - [x] 用 `aplay -l` 核对 3.5mm 输出设备，确认 `AUDIO_DEVICE=plughw:1,0`
@@ -68,7 +74,6 @@
   serial 单测覆盖，实机待验）。
 - [ ] 记录 TRRS 引脚、音量、声卡设备和可复现接线方案；若直连失败，评估转接、
   衰减、隔直或混音硬件。
-
 ## P0：完成单通道 Call Worker
 
 - [x] 将 `ModemClient`、事件解析器和音频播放接入 `CallWorker`。
@@ -95,14 +100,18 @@
 
 ## P1：测试与可靠性
 
-- [ ] 为计划时间计算、无效 cron、时区和夏令时边界增加单元测试。
-- [ ] 为到期入队、暂停调度、立即拨打和重启恢复增加临时 SQLite 测试。
+- [x] 为计划时间计算、无效 cron 和时区转换增加单元测试（应用场景无夏令时
+  corner case，不测 DST 边界；tests/test_plan_times.py）。
+- [x] 为到期入队、暂停调度、立即拨打和重启恢复增加临时 SQLite 测试
+  （tests/test_scheduler_flow.py、tests/test_plans.py）。
 - [x] 为 Call Worker 增加 fake serial 和 fake audio 测试，覆盖成功、忙线、拒接、
   超时、播放失败和挂断。
-- [x] 增加登录保护、客户/话术/计划表单校验和主要页面 smoke test（tests/test_web_ui.py）。
+- [x] 增加登录保护、客户/话术/计划表单校验和主要页面 smoke test（tests/test_web_ui.py、
+  tests/test_web_auth.py）。
 - [x] 修正删除被计划或通话记录引用的客户/话术时的用户可见错误处理（引用数量提示）。
-- [ ] 校验 `SESSION_SECRET`，避免真实部署时为空或继续使用示例值。
-- [ ] 增加结构化运行日志，并避免记录完整密钥和不必要的完整手机号。
+- [x] 校验 `SESSION_SECRET`，启动时拒绝空值或示例值（tests/test_config.py）。
+- [x] 增加结构化运行日志（app/logging.py，时间/级别/logger 格式），RedactFilter
+  避免记录完整密钥和完整手机号（tests/test_logging.py）。
 
 ## 系统监控（/admin/system）
 
@@ -113,9 +122,10 @@
 - [x] 运行日志 tab：通话事件（可按事件类型筛选）+ 审计日志。
 - [x] 相关设置 tab：非密钥环境配置与运行时设置展示。
 - [x] 移除右上角调度器状态泡泡，入口统一收进“系统管理 → 系统监控”。
-- [ ] 鉴权：系统监控页（及现有 /admin/* 页面）目前仅要求登录，未限制管理员
-  才能查看；待权限体系完善后统一加 `auth.require_permission` 拦截。
-- [ ] Worker 状态页在硬开关关闭时给出“配置未开启”引导，考虑提供串口可用性探测。
+- [x] 鉴权：系统监控页（及现有 /admin/* 页面）统一加 `auth.require_permission`
+  拦截（manage_config / manage_users / import / export 等，未授权 403）。
+- [x] Worker 状态页在硬开关关闭时给出“配置未开启”引导；串口可用性采用只读
+  探测（设备节点存在性 + Worker 最近运行结果，不打开串口、不发 AT）。
 
 ## P1：后台操作体验
 
@@ -129,15 +139,18 @@
 
 ## P2：音频与部署
 
-- [ ] 接入一个真实 TTS Provider，并保留 `TTS_PROVIDER=none` 作为离线默认值。
+- [ ] 接入一个真实 TTS Provider，并保留 `TTS_PROVIDER=none` 作为离线默认值
+  （需要 TTS API key，属人工配置项）。
 - [x] 规范生成 WAV 的目录、命名、采样率、声道和缓存/覆盖策略（`data/audio/`，
   `script-{id}-{正文sha1前12位}.wav`，8kHz/16bit/mono，原子写覆盖，见
   app/audio.py 与 README「话术音频」）。
 - [x] 增加音频生成失败状态（`tts_error` 记录原因）、重新生成入口与结果反馈，
   以及页面试听（登录后可读 `/audio/...` 只读路由，限 `data/audio/` 内 WAV，
   防路径穿越）。
-- [ ] 编写 Rock Pi 3A 部署文档，包括串口权限、声卡选择、`uv sync` 和服务启动。
-- [ ] 提供 systemd 服务示例，区分 Web/Scheduler 与硬件 Worker 的启动开关。
+- [x] 编写 Rock Pi 3A 部署文档（docs/deploy-rockpi.md：串口权限、声卡选择、
+  `uv sync` 和服务启动）。
+- [x] 提供 systemd 服务示例（scripts/systemd/：Web/Scheduler 与硬件 Worker
+  的启动开关，Worker 由 `CALL_WORKER_ENABLED` 控制）。
 
 ## P1：备份与灾备
 
@@ -169,10 +182,11 @@
 
 ## 最小 Demo 验收
 
-- [ ] 管理员可登录并管理客户、话术和 `once` / `cron` 回访计划。
-- [ ] 到期计划只生成一次正确排序的任务，暂停调度时不生成新任务。
-- [ ] 单通道 Worker 能拨号、识别接通、播放 WAV、挂断并释放资源。
-- [ ] 成功、短通话、未接通、忙线、超时和播放失败均有正确主状态。
-- [ ] 每次通话可在后台查看完整时间、时长、错误和串口事件。
-- [ ] 自动重试不超过配置上限，服务重启不会补打历史任务。
-- [ ] 自动化测试通过，真实硬件链路由操作者完成一次端到端验收。
+- [x] 管理员可登录并管理客户、话术和 `once` / `cron` 回访计划。
+- [x] 到期计划只生成一次正确排序的任务，暂停调度时不生成新任务。
+- [x] 单通道 Worker 能拨号、识别接通、播放 WAV、挂断并释放资源。
+- [x] 成功、短通话、未接通、忙线、超时和播放失败均有正确主状态。
+- [x] 每次通话可在后台查看完整时间、时长、错误和串口事件。
+- [x] 自动重试不超过配置上限，服务重启不会补打历史任务。
+- [x] 自动化测试通过（154 项），真实硬件链路由操作者完成端到端验收（smoke +
+  应用级 E2E + 对端听音）；未接通/挂断等实机释放路径仍待人工补验。
