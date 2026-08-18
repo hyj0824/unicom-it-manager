@@ -17,7 +17,7 @@
         <nav class="nav" aria-label="主导航">
           <a class="{% if path == '/' %}active{% endif %}" href="/">工作台</a>
           <details class="nav-section" {% if path.startswith('/ledger') or path.startswith('/devices') %}open{% endif %}>
-            <summary>客户与台账</summary>
+            <summary>数据录入</summary>
             <a class="{% if path.startswith('/ledger') %}active{% endif %}" href="/ledger">业务台账</a>
             <a class="{% if path.startswith('/devices') %}active{% endif %}" href="/devices">网络设备</a>
           </details>
@@ -27,9 +27,9 @@
             <a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>
             <a class="{% if path.startswith('/imports') or path.startswith('/exports') %}active{% endif %}" href="/imports">导入导出</a>
           </details>
-          <details class="nav-section" {% if path.startswith('/customers') or path.startswith('/contacts') or path.startswith('/plans') or path.startswith('/scripts') or path.startswith('/calls') %}open{% endif %}>
+          <details class="nav-section" {% if path.startswith('/contacts') or path.startswith('/plans') or path.startswith('/scripts') or path.startswith('/calls') %}open{% endif %}>
             <summary>回访与通话</summary>
-            <a class="{% if path.startswith('/customers') or path.startswith('/contacts') %}active{% endif %}" href="/customers">通讯录</a>
+            <a class="{% if path.startswith('/contacts') %}active{% endif %}" href="/contacts">通讯录</a>
             <a class="{% if path.startswith('/plans') %}active{% endif %}" href="/plans">回访计划</a>
             <a class="{% if path.startswith('/scripts') %}active{% endif %}" href="/scripts">话术管理</a>
             <a class="{% if path.startswith('/calls') %}active{% endif %}" href="/calls">通话记录</a>

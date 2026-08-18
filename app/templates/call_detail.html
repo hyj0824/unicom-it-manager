@@ -67,10 +67,6 @@
         回访反馈
         <textarea name="operator_feedback" rows="6">{{ record.operator_feedback }}</textarea>
       </label>
-      <label class="check">
-        <input type="checkbox" name="follow_up_required" {% if record.follow_up_required %}checked{% endif %}>
-        需要人工跟进
-      </label>
       <button class="button primary" type="submit">保存反馈</button>
     </form>
   </section>

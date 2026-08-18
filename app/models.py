@@ -102,11 +102,40 @@ class CallbackPlan(TimestampMixin, Base):
     call_records: Mapped[list["CallRecord"]] = relationship(back_populates="plan")
 
 
+class ScanSchedule(TimestampMixin, Base):
+    """系统级扫描通知配置：取代手动回访计划。
+
+    调度器按 `cron_expr`（每日时段或每周几）触发对应扫描，把到期维系、
+    设备回收等待办汇总成通知任务（CallTask），通知对象是运维工作人员。
+    """
+
+    __tablename__ = "scan_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # due_renewal=协议到期维系；device_recycle=退网设备回收。
+    scan_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    cron_expr: Mapped[str] = mapped_column(
+        String(120), default="0 9 * * *", nullable=False
+    )
+    timezone: Mapped[str] = mapped_column(
+        String(80), default="Asia/Shanghai", nullable=False
+    )
+    # 提前天数：到期前 N 天进入通知范围。
+    lead_days: Mapped[int] = mapped_column(Integer, default=14, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+    tasks: Mapped[list["CallTask"]] = relationship(back_populates="scan_schedule")
+
+
 class CallTask(TimestampMixin, Base):
     __tablename__ = "call_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("callback_plans.id"))
+    scan_schedule_id: Mapped[int | None] = mapped_column(ForeignKey("scan_schedules.id"))
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
     script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id"), nullable=False)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
@@ -115,6 +144,9 @@ class CallTask(TimestampMixin, Base):
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
     # 入队时从联系人快照的拨号号码；号码变更不影响已入队任务。
     dial_number: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    # 扫描任务快照：business_service_id / device_id / scan_schedule_id /
+    # rendered_script / due_date 等，供去重、追踪与话术回放。
+    meta_json: Mapped[str] = mapped_column(Text, default="", nullable=False)
     attempt: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     max_attempts: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -122,6 +154,7 @@ class CallTask(TimestampMixin, Base):
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     plan: Mapped[CallbackPlan | None] = relationship(back_populates="call_tasks")
+    scan_schedule: Mapped[ScanSchedule | None] = relationship(back_populates="tasks")
     customer: Mapped[Customer] = relationship(back_populates="call_tasks")
     script: Mapped[Script] = relationship(back_populates="call_tasks")
     contact: Mapped["Contact | None"] = relationship()
@@ -145,12 +178,6 @@ class CallRecord(TimestampMixin, Base):
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     operator_feedback: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    recording_path: Mapped[str] = mapped_column(String(500), default="", nullable=False)
-    transcript_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    summary_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    sentiment: Mapped[str] = mapped_column(String(80), default="", nullable=False)
-    follow_up_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    ai_result_json: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     task: Mapped[CallTask | None] = relationship(back_populates="call_record")
     plan: Mapped[CallbackPlan | None] = relationship(back_populates="call_records")
@@ -514,13 +541,18 @@ class StagingRow(Base):
 
 
 class User(TimestampMixin, Base):
-    """用户账号：只能由超级管理员创建；未绑定角色与数据范围前没有业务数据权限。"""
+    """用户账号：只能由超级管理员创建；未绑定角色与数据范围前没有业务数据权限。
+
+    `real_name` / `phone` 用于按步骤通知对应负责人；系统管理员可不设手机。
+    """
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    real_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    phone: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_superadmin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -575,39 +607,3 @@ class RolePermission(Base):
     )
 
 
-class CustomFieldDefinition(TimestampMixin, Base):
-    """预留扩展字段定义：只允许管理员配置，不动态修改数据库列。"""
-
-    __tablename__ = "custom_field_definitions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
-    label: Mapped[str] = mapped_column(String(120), nullable=False)
-    field_type: Mapped[str] = mapped_column(String(32), default="text", nullable=False)
-    domain: Mapped[str] = mapped_column(String(32), default="business", nullable=False)
-    is_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-
-
-class CustomFieldValue(Base):
-    __tablename__ = "custom_field_values"
-    __table_args__ = (
-        UniqueConstraint(
-            "definition_id", "entity_type", "entity_id", name="uq_custom_field_values_target"
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    definition_id: Mapped[int] = mapped_column(
-        ForeignKey("custom_field_definitions.id"), nullable=False
-    )
-    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    value_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
-    )

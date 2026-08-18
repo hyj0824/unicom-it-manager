@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.models import CallbackPlan, Contact, Customer, CustomerContact, Script
 from app.services.customers import (
-    customer_phone_map,
     default_contact,
     sync_default_contact,
 )
@@ -96,15 +95,6 @@ def test_default_contact_prefers_default_duty_and_active(db: Session) -> None:
     db.commit()
 
     assert default_contact(db, customer).id == contact_a.id
-
-
-def test_customer_phone_map(db: Session) -> None:
-    make_customer(db, "客户A", "13800000000")
-    make_customer(db, "客户B", "13900000001")
-    customers = db.query(Customer).all()
-    phone_map = customer_phone_map(db, customers)
-    assert phone_map[customers[0].id] == "13800000000"
-    assert phone_map[customers[1].id] == "13900000001"
 
 
 def test_create_call_task_snapshots_contact_and_number(db: Session) -> None:

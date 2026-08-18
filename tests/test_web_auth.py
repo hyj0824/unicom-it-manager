@@ -166,8 +166,11 @@ def test_system_read_permission_only_allows_monitor_logs(client: TestClient, web
 
 
 def seed_basics(client: TestClient, webdb, name: str) -> dict[str, int]:
-    """通过表单创建客户/话术/联系人，返回 id 供计划表单使用。"""
-    client.post("/customers", data={"name": name, "notes": ""})
+    """创建客户主体/话术/联系人，返回 id 供计划表单使用。"""
+    # 客户主体由台账导入审核链路维护，Web 不再提供客户表单；测试直接建主数据。
+    with webdb() as db:
+        db.add(Customer(name=name, notes=""))
+        db.commit()
     client.post("/scripts", data={"title": f"话术-{name}", "body": f"内容-{name}"})
     client.post("/contacts", data={"name": f"联系人-{name}", "phone": "13800000000"})
     with webdb() as db:
@@ -193,7 +196,7 @@ def test_unauthenticated_requests_redirect_to_login(client: TestClient) -> None:
         ("GET", "/calls"),
         ("GET", "/admin/system"),
         ("GET", "/imports"),
-        ("POST", "/customers"),
+        ("POST", "/contacts"),
         ("POST", "/scripts"),
         ("POST", "/plans"),
         ("POST", "/settings/scheduler"),
@@ -236,7 +239,6 @@ def test_login_redirects_and_pages_render(client: TestClient) -> None:
     for path in [
         "/",
         "/contacts",
-        "/customers",
         "/plans",
         "/scripts",
         "/calls",
@@ -262,23 +264,6 @@ def test_login_redirects_and_pages_render(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------- 表单校验
-
-
-def test_customer_form_validation(client: TestClient, webdb) -> None:
-    login(client)
-    resp = client.post("/customers", data={"name": "  ", "notes": ""})
-    assert resp.status_code == 400
-    assert "客户名称不能为空" in resp.text
-
-    # 合法提交：客户写入数据库。
-    resp = client.post(
-        "/customers", data={"name": "客户乙", "notes": "备注"}, follow_redirects=False
-    )
-    assert resp.status_code == 303
-    with webdb() as db:
-        assert (
-            db.scalar(select(Customer.id).where(Customer.name == "客户乙")) is not None
-        )
 
 
 def test_script_form_validation(client: TestClient) -> None:

@@ -38,7 +38,6 @@ from .models import (
     ChangeSet,
     Contact,
     Customer,
-    CustomerContact,
     BusinessService,
     DictionaryItem,
     ImportBatch,
@@ -58,7 +57,6 @@ from .services import reviews as review_service
 from .services import plans as plan_service
 from .services.call_worker import call_worker_service, modem_availability
 from .services.backups import backup_service
-from .services.customers import customer_phone_map, referencing_counts as customer_referencing_counts
 from .services.dictionaries import active_items, resolve_or_create_item
 from .services.scripts import (
     generate_script_audio,
@@ -474,48 +472,7 @@ async def worker_toggle(request: Request, db: Session = Depends(get_db)):
     return redirect_to(str(form.get("next", "/admin/system")))
 
 
-# ---------------------------------------------------------------- 客户与联系人
-
-
-def customers_template(
-    request: Request,
-    db: Session,
-    error: str = "",
-    contact_error: str = "",
-    call_error: str = "",
-    form_data: dict[str, str] | None = None,
-    contact_form: dict[str, str] | None = None,
-    edit_customer: Customer | None = None,
-    edit_contact_id: int | None = None,
-    status_code: int = 200,
-):
-    customers = db.scalars(select(Customer).order_by(Customer.created_at.desc())).all()
-    contacts: list[CustomerContact] = []
-    if edit_customer is not None:
-        contacts = db.scalars(
-            select(CustomerContact)
-            .where(CustomerContact.customer_id == edit_customer.id)
-            .order_by(CustomerContact.id.asc())
-        ).all()
-    scripts = db.scalars(select(Script).order_by(Script.title.asc())).all()
-    return render(
-        request,
-        "customers.html",
-        db,
-        status_code=status_code,
-        customers=customers,
-        contacts=contacts,
-        customer_phones=customer_phone_map(db, customers),
-        duties=active_items(db, "contact_duty"),
-        scripts=scripts,
-        edit_customer=edit_customer,
-        edit_contact_id=edit_contact_id,
-        form_data=form_data or {},
-        contact_form=contact_form or {},
-        error=error,
-        contact_error=contact_error,
-        call_error=call_error,
-    )
+# ---------------------------------------------------------------- 通讯录
 
 
 def contacts_template(
@@ -564,154 +521,6 @@ async def directory_contact_create(request: Request, db: Session = Depends(get_d
     return redirect_to("/contacts")
 
 
-@app.get("/customers")
-def customers_page(
-    request: Request,
-    edit_id: int | None = None,
-    edit_contact_id: int | None = None,
-    db: Session = Depends(get_db),
-):
-    auth.require_login(request)
-    edit_customer = db.get(Customer, edit_id) if edit_id else None
-    return customers_template(
-        request,
-        db,
-        edit_customer=edit_customer,
-        edit_contact_id=edit_contact_id,
-    )
-
-
-@app.post("/customers")
-async def customer_create(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
-    form = await request.form()
-    name = str(form.get("name", "")).strip()
-    notes = str(form.get("notes", "")).strip()
-    form_data = {"name": name, "notes": notes}
-    if not name:
-        return customers_template(request, db, "客户名称不能为空。", form_data, status_code=400)
-    db.add(Customer(name=name, notes=notes))
-    db.commit()
-    return redirect_to("/customers")
-
-
-@app.post("/customers/{customer_id}/edit")
-async def customer_update(customer_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
-    customer = get_or_404(db, Customer, customer_id)
-    form = await request.form()
-    name = str(form.get("name", "")).strip()
-    notes = str(form.get("notes", "")).strip()
-    if not name:
-        return customers_template(
-            request, db, "客户名称不能为空。", edit_customer=customer, status_code=400
-        )
-    customer.name = name
-    customer.notes = notes
-    customer.version += 1
-    db.commit()
-    return redirect_to(f"/customers?edit_id={customer.id}")
-
-
-@app.post("/customers/{customer_id}/delete")
-def customer_delete(customer_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
-    customer = get_or_404(db, Customer, customer_id)
-    refs = customer_referencing_counts(db, customer)
-    # 负责人关联随客户删除级联移除，不构成删除障碍；只有业务/计划/任务/记录会阻止。
-    blocking = {key: refs[key] for key in ("services", "plans", "tasks", "records")}
-    if any(blocking.values()):
-        parts = []
-        for label, key in [
-            ("有效业务", "services"),
-            ("回访计划", "plans"),
-            ("外呼任务", "tasks"),
-            ("通话记录", "records"),
-        ]:
-            if blocking[key]:
-                parts.append(f"{label} {blocking[key]} 条")
-        return customers_template(
-            request,
-            db,
-            f"该客户仍被引用（{'、'.join(parts)}），不能删除；可考虑停用。",
-            status_code=400,
-        )
-    try:
-        db.delete(customer)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        return customers_template(
-            request,
-            db,
-            "该客户被其他数据引用，不能删除；可考虑停用。",
-            status_code=400,
-        )
-    return redirect_to("/customers")
-
-
-@app.post("/customers/{customer_id}/call-now")
-async def customer_call_now(customer_id: int, request: Request, db: Session = Depends(get_db)):
-    """从客户发起「立即拨打一次」：生成独立的一次性任务，不改动任何计划。"""
-
-    auth.require_login(request)
-    customer = get_or_404(db, Customer, customer_id)
-    form = await request.form()
-    script = get_or_404(db, Script, _form_int(form, "script_id") or 0)
-    contact_id = _form_int(form, "contact_id")
-    contact = db.get(Contact, contact_id) if contact_id else None
-    try:
-        plan_service.create_manual_call_task(
-            db,
-            customer,
-            script,
-            contact=contact,
-            message="网页端从客户发起立即拨打。",
-            source="manual",
-        )
-    except ValueError as exc:
-        return customers_template(
-            request,
-            db,
-            call_error=str(exc),
-            edit_customer=customer,
-            status_code=400,
-        )
-    ledger_service.log_action(
-        db, "dial", _user_id(request), "customer", customer.id,
-        json.dumps({"action": "call_now", "script_id": script.id}, ensure_ascii=False),
-        _client_ip(request),
-    )
-    db.commit()
-    return redirect_to("/calls")
-
-
-@app.post("/customers/{customer_id}/contacts")
-async def contact_create(customer_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
-    customer = get_or_404(db, Customer, customer_id)
-    form = await request.form()
-    name = str(form.get("name", "")).strip()
-    phone = str(form.get("phone", "")).strip()
-    duty = str(form.get("duty", "")).strip()
-    contact_form = {"name": name, "phone": phone, "duty": duty}
-    if phone and not plan_service.validate_phone(phone):
-        return customers_template(
-            request,
-            db,
-            contact_error="电话格式不正确（应为 +?[0-9]{5,20}）。",
-            contact_form=contact_form,
-            edit_customer=customer,
-            status_code=400,
-        )
-    contact = Contact(name=name or None, phone=phone or None)
-    db.add(contact)
-    db.flush()
-    db.add(CustomerContact(customer=customer, contact=contact, duty=duty))
-    db.commit()
-    return redirect_to(f"/customers?edit_id={customer.id}")
-
-
 @app.post("/contacts/{contact_id}/edit")
 async def contact_update(contact_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
@@ -739,10 +548,6 @@ def contact_delete(contact_id: int, request: Request, db: Session = Depends(get_
     contact = get_or_404(db, Contact, contact_id)
     contact.is_active = False
     db.commit()
-    # 从客户详情发起时回到客户上下文，否则回通讯录目录。
-    customer_id = _form_int(request.query_params, "customer_id")
-    if customer_id:
-        return redirect_to(f"/customers?edit_id={customer_id}")
     return redirect_to("/contacts")
 
 
@@ -2266,6 +2071,5 @@ async def call_feedback(record_id: int, request: Request, db: Session = Depends(
     record = get_or_404(db, CallRecord, record_id)
     form = await request.form()
     record.operator_feedback = str(form.get("operator_feedback", "")).strip()
-    record.follow_up_required = str(form.get("follow_up_required", "")) == "on"
     db.commit()
     return redirect_to(f"/calls/{record.id}")

@@ -41,7 +41,6 @@ from app.models import (
 from app.services import plans as plan_service
 from app.services.call_worker import modem_availability
 from app.services.customers import default_contact
-from app.services.customers import referencing_counts as customer_referencing_counts
 from app.services.customers import sync_default_contact
 from app.services.scripts import referencing_counts as script_referencing_counts
 
@@ -164,7 +163,7 @@ def default_contact_id(customer_id: int) -> int | None:
 
 
 def test_login_required_redirects(client: TestClient) -> None:
-    for path in ["/", "/calls", "/plans", "/customers", "/scripts", "/admin/system"]:
+    for path in ["/", "/calls", "/plans", "/contacts", "/scripts", "/admin/system"]:
         resp = client.get(path, follow_redirects=False)
         assert resp.status_code == 303, path
         assert resp.headers["location"] == "/login", path
@@ -417,49 +416,6 @@ def test_plan_call_now_creates_queued_task_without_touching_plan(client: TestCli
         assert plan_ref.enabled is True
 
 
-def test_customer_call_now_creates_queued_task_without_plan(client: TestClient) -> None:
-    login(client)
-    customer = make_customer()
-    script = make_script()
-    plan_count_before = _plan_count()
-
-    resp = client.post(
-        f"/customers/{customer.id}/call-now",
-        data={"script_id": script.id},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 303
-
-    with SessionLocal() as session:
-        tasks = session.scalars(select(CallTask).where(CallTask.customer_id == customer.id)).all()
-        assert len(tasks) == 1
-        assert tasks[0].status == "queued"
-        assert tasks[0].plan_id is None
-        assert tasks[0].dial_number == "13800000000"
-        assert tasks[0].call_record.plan_id is None
-    assert _plan_count() == plan_count_before  # 不新建计划
-
-
-def test_customer_call_now_without_phone_errors(client: TestClient) -> None:
-    login(client)
-    customer = make_customer(phone=None)
-    script = make_script()
-    resp = client.post(
-        f"/customers/{customer.id}/call-now", data={"script_id": script.id}
-    )
-    assert resp.status_code == 400
-    assert "没有可拨打的电话" in resp.text
-    with SessionLocal() as session:
-        assert session.scalars(select(CallTask)).all() == []
-
-
-def test_customer_call_now_missing_script_errors(client: TestClient) -> None:
-    login(client)
-    customer = make_customer()
-    resp = client.post(f"/customers/{customer.id}/call-now", data={})
-    assert resp.status_code == 404
-
-
 # ---------------------------------------------------------------- 人工重新入队
 
 
@@ -558,11 +514,7 @@ def test_high_impact_forms_have_data_confirm(client: TestClient) -> None:
     login(client)
     customer = make_customer()
     script = make_script()
-    plan = make_cron_plan(customer, script)
-
-    customers_page = client.get("/customers")
-    assert "立即为该客户生成一次外呼任务并加入队列" in customers_page.text
-    assert "删除该客户" in customers_page.text
+    make_cron_plan(customer, script)
 
     plans_page = client.get("/plans")
     assert "立即拨打该计划选择的负责人" in plans_page.text
@@ -574,30 +526,6 @@ def test_high_impact_forms_have_data_confirm(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------- 删除被引用数据
-
-
-def test_delete_customer_referenced_by_plan_and_record(client: TestClient) -> None:
-    login(client)
-    customer = make_customer()
-    script = make_script()
-    plan = make_cron_plan(customer, script)
-    make_task_record(customer, script, plan=plan, status="completed")
-
-    resp = client.post(f"/customers/{customer.id}/delete")
-    assert resp.status_code == 400
-    assert "回访计划 1 条" in resp.text
-    assert "通话记录 1 条" in resp.text
-    with SessionLocal() as session:
-        assert session.get(Customer, customer.id) is not None
-
-
-def test_delete_customer_without_references_succeeds(client: TestClient) -> None:
-    login(client)
-    customer = make_customer()
-    resp = client.post(f"/customers/{customer.id}/delete", follow_redirects=False)
-    assert resp.status_code == 303
-    with SessionLocal() as session:
-        assert session.get(Customer, customer.id) is None
 
 
 def test_delete_script_referenced_by_plan_shows_counts(client: TestClient) -> None:
@@ -714,11 +642,6 @@ def test_referencing_counts_helpers(db) -> None:
     plan_service.create_call_task(db, plan, status="queued")
     db.commit()
 
-    refs = customer_referencing_counts(db, customer)
-    assert refs["plans"] == 1
-    assert refs["tasks"] == 1
-    assert refs["records"] == 1
-
     script_refs = script_referencing_counts(db, script)
     assert script_refs["plans"] == 1
     assert script_refs["tasks"] == 1
@@ -744,15 +667,10 @@ def test_modem_availability_levels() -> None:
     assert modem_availability(settings2, {})["level"] == "warn"
 
 
-def test_nav_section_open_on_customers_page(client: TestClient) -> None:
-    """回归：进入 /customers 时「回访与通话」导航组必须展开。
-
-    链接 active 判断含 /customers，但 <details> open 条件曾漏掉它，
-    导致进入客户页时整组导航收起。
-    """
+def test_nav_section_open_on_contacts_page(client: TestClient) -> None:
+    """回归：进入 /contacts（通讯录）时「回访与通话」导航组必须展开。"""
     login(client)
     for page, expected_open in [
-        ("/customers", True),
         ("/contacts", True),
         ("/plans", True),
         ("/scripts", True),
