@@ -72,7 +72,13 @@ from .services.settings import (
     is_worker_enabled,
     set_setting,
 )
-from .services.users import hash_password, role_names, set_user_roles, validate_user_profile
+from .services.users import (
+    hash_password,
+    role_names,
+    set_user_roles,
+    validate_user_profile,
+    verify_password,
+)
 
 
 settings = get_settings()
@@ -377,6 +383,11 @@ async def login_submit(request: Request, db: Session = Depends(get_db)):
         ip_address=_client_ip(request),
     )
     db.commit()
+    if principal.get("type") == "user":
+        user = db.get(User, principal.get("id"))
+        if user is not None and user.force_password_change:
+            # 自动建号账号初始密码为随机值，首次登录必须先改密。
+            return redirect_to("/password-change")
     return redirect_to("/")
 
 
@@ -384,6 +395,53 @@ async def login_submit(request: Request, db: Session = Depends(get_db)):
 def logout_submit(request: Request):
     auth.logout(request)
     return redirect_to("/login")
+
+
+# ---------------------------------------------------------------- 首次登录改密
+
+
+@app.get("/password-change")
+def password_change_page(request: Request):
+    auth.require_login(request)
+    return render(request, "password_change.html")
+
+
+@app.post("/password-change")
+async def password_change_submit(request: Request, db: Session = Depends(get_db)):
+    auth.require_login(request)
+    principal = auth.current_user(request)
+    if principal is None or principal.get("type") != "user":
+        return redirect_to("/")
+    user = db.get(User, principal.get("id"))
+    if user is None:
+        return redirect_to("/")
+    form = await request.form()
+    old_password = str(form.get("old_password", ""))
+    new_password = str(form.get("new_password", ""))
+    confirm_password = str(form.get("confirm_password", ""))
+    error = None
+    if not verify_password(old_password, user.password_hash):
+        error = "当前密码不正确。"
+    elif len(new_password) < 8:
+        error = "新密码至少 8 位。"
+    elif new_password != confirm_password:
+        error = "两次输入的新密码不一致。"
+    if error:
+        return render(request, "password_change.html", error=error, status_code=400)
+    was_forced = user.force_password_change
+    user.password_hash = hash_password(new_password)
+    user.force_password_change = False
+    ledger_service.log_action(
+        db,
+        "change_password",
+        _user_id(request),
+        "user",
+        user.id,
+        json.dumps({"forced_first_login": was_forced}, ensure_ascii=False),
+        _client_ip(request),
+    )
+    db.commit()
+    return redirect_to("/")
 
 
 # ---------------------------------------------------------------- 工作台
@@ -1620,6 +1678,8 @@ async def admin_user_password(user_id: int, request: Request, db: Session = Depe
     if len(password) < 8:
         return _users_page(request, db, error="密码至少 8 位。", edit_user=user, status_code=400)
     user.password_hash = hash_password(password)
+    # 管理员重置后视为发放新初始密码，被重置账号下次登录须改密。
+    user.force_password_change = True
     db.commit()
     return redirect_to("/admin/users")
 
