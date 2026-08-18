@@ -98,3 +98,10 @@ def validate_runtime_settings(settings: Settings) -> None:
         raise RuntimeError(
             "ADMIN_PASSWORD must be configured before starting the web server."
         )
+    # SESSION_SECRET 用于签名登录会话 Cookie，与 ADMIN_PASSWORD 同级校验：
+    # 为空或仍为 .env.example 的示例值时拒绝启动，防止真实部署使用弱密钥。
+    if not settings.session_secret or settings.session_secret == "change-me-too":
+        raise RuntimeError(
+            "SESSION_SECRET must be configured with a random value "
+            "before starting the web server."
+        )

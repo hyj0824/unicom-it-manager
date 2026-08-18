@@ -25,6 +25,7 @@ from .config import (
     validate_runtime_settings,
 )
 from .database import SessionLocal, check_schema_current, get_db, get_schema_head
+from .logging import configure_logging
 from .models import (
     AuditLog,
     CallEvent,
@@ -68,6 +69,9 @@ from .services.users import hash_password, role_names, set_user_roles
 
 
 settings = get_settings()
+configure_logging(
+    redact_secrets=(settings.admin_password, settings.session_secret, settings.tts_api_key)
+)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 APP_TITLE = "中国联通 IT 运维客户信息管理系统"
