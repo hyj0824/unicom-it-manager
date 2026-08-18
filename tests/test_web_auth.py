@@ -205,6 +205,8 @@ def test_unauthenticated_requests_redirect_to_login(client: TestClient) -> None:
         ("GET", "/calls"),
         ("GET", "/admin/system"),
         ("GET", "/imports"),
+        ("GET", "/password-change"),
+        ("POST", "/password-change"),
         ("POST", "/contacts"),
         ("POST", "/scripts"),
         ("POST", "/scan-schedules"),

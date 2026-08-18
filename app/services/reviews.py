@@ -10,6 +10,7 @@ from ..models import (
     BusinessService, ChangeItem, ChangeSet, Contact, Customer, CustomerContact,
     DictionaryCategory, DictionaryItem, ImportBatch, NetworkDevice, StagingRow, utcnow,
 )
+from . import provisioning
 
 
 class ChangeApplicationError(ValueError):
@@ -371,7 +372,14 @@ def apply_change_set(db: Session, change_set: ChangeSet, user_id: int | None) ->
     if not change_set.items: raise ChangeApplicationError("变更申请没有可应用的条目。")
     applied = 0
     for item in change_set.items:
-        entity, payload = _apply_device(db, item) if item.entity_type.replace("_", "").lower() == "networkdevice" else _apply_business(db, item)
+        if item.entity_type.replace("_", "").lower() == "networkdevice":
+            entity, payload = _apply_device(db, item)
+            # 台账应用后按职责自动创建登录账号（网络维护责任人 → network_maintainer）。
+            provisioning.provision_users_from_device_payload(db, payload)
+        else:
+            entity, payload = _apply_business(db, item)
+            # 台账应用后按职责自动创建登录账号（客户经理 → business_maintainer）。
+            provisioning.provision_users_from_business_payload(db, payload)
         for staging_id in payload.get("staging_row_ids", []):
             row = db.get(StagingRow, staging_id)
             if row: row.result_entity_type = item.entity_type; row.result_entity_id = entity.id
