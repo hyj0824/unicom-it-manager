@@ -11,8 +11,8 @@
 - **审核卡单提醒**：待审核的变更申请每天定时提醒审核人员处理。
 
 通话对象是**运维工作人员**（客户经理、网络维护责任人、审核人员），不是
-客户本人；短信同步通知列为后续能力。通知任务由每日扫描自动生成，管理员
-不再手动设置客户回访计划。
+客户本人；通知任务由每日扫描自动生成，扫描配置可勾选同步短信通知（A7670E
+短信通道，Worker 空闲时串行发送），管理员不再手动设置客户回访计划。
 
 The original callback details remain in `docs/callback-demo-plan.md`; the
 expanded product baselines are in:

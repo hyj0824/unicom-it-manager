@@ -33,6 +33,7 @@ EXPECTED_TABLES = {
     "roles",
     "scan_schedules",
     "scripts",
+    "sms_notifications",
     "staging_rows",
     "user_roles",
     "users",

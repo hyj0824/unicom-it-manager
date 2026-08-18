@@ -45,6 +45,7 @@ from .models import (
     RolePermission,
     ScanSchedule,
     Script,
+    SmsNotification,
     StagingRow,
     User,
     UserRole,
@@ -143,6 +144,27 @@ SOURCE_LABELS = {
 }
 
 
+# 短信通知状态（app/models.py SmsNotification.status）。
+SMS_STATUS_LABELS = {
+    "pending": "待发送",
+    "sent": "已发送",
+    "failed": "失败",
+}
+
+
+def mask_phone(phone: str) -> str:
+    """手机号脱敏：138****0000；过短或异常号码原样展示。"""
+
+    phone = (phone or "").strip()
+    if len(phone) < 8:
+        return phone
+    return phone[:3] + "*" * (len(phone) - 7) + phone[-4:]
+
+
+def sms_status_label(value: str) -> str:
+    return SMS_STATUS_LABELS.get(value, value or "-")
+
+
 def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -228,6 +250,8 @@ templates.env.filters["status_label"] = status_label
 templates.env.filters["domain_label"] = domain_label
 templates.env.filters["source_label"] = source_label
 templates.env.filters["scan_type_label"] = scan_type_label
+templates.env.filters["mask_phone"] = mask_phone
+templates.env.filters["sms_status_label"] = sms_status_label
 templates.env.filters["script_audio_url"] = script_audio_url
 
 
@@ -2010,6 +2034,7 @@ def _parse_scan_schedule_form(db: Session, form) -> dict:
     if lead_days < 0:
         raise ValueError("提前天数不能为负数。")
     enabled = str(form.get("enabled", "")) == "on"
+    sms_enabled = str(form.get("sms_enabled", "")) == "on"
     return {
         "name": name,
         "scan_type": scan_type,
@@ -2018,6 +2043,7 @@ def _parse_scan_schedule_form(db: Session, form) -> dict:
         "timezone": timezone_name,
         "lead_days": lead_days,
         "enabled": enabled,
+        "sms_enabled": sms_enabled,
     }
 
 
@@ -2102,6 +2128,28 @@ def scan_schedule_toggle(schedule_id: int, request: Request, db: Session = Depen
     schedule.enabled = not schedule.enabled
     db.commit()
     return redirect_to("/scan-schedules")
+
+
+# ---------------------------------------------------------------- 短信通知
+
+SMS_PAGE_LIMIT = 200
+
+
+@app.get("/sms")
+def sms_page(request: Request, db: Session = Depends(get_db)):
+    auth.require_login(request)
+    records = db.scalars(
+        select(SmsNotification)
+        .order_by(SmsNotification.id.desc())
+        .limit(SMS_PAGE_LIMIT)
+    ).all()
+    return render(
+        request,
+        "sms.html",
+        db,
+        records=records,
+        limit=SMS_PAGE_LIMIT,
+    )
 
 
 # ---------------------------------------------------------------- 通话记录

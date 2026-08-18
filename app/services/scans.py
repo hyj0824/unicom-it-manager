@@ -37,6 +37,7 @@ from ..models import (
     RolePermission,
     ScanSchedule,
     Script,
+    SmsNotification,
     User,
     UserRole,
     utcnow,
@@ -234,6 +235,25 @@ def _base_task_meta(
     return meta
 
 
+def _maybe_enqueue_sms(
+    db: Session, settings, schedule: ScanSchedule, task: CallTask, phone: str, body: str
+) -> None:
+    """扫描配置与全局配置都开启短信时，把通知任务同步入队为待发短信。
+
+    与任务同一事务：创建失败则整个扫描失败回滚（正常，调用方吞掉并写
+    last_error）。content 复用渲染后的话术正文，电话即任务拨号号码。
+    """
+    if schedule.sms_enabled and settings.sms_enabled:
+        db.add(
+            SmsNotification(
+                call_task_id=task.id,
+                phone=phone,
+                content=body,
+                status="pending",
+            )
+        )
+
+
 # ---------------------------------------------------------------------------
 # 协议到期维系扫描
 # ---------------------------------------------------------------------------
@@ -300,29 +320,30 @@ def run_due_renewal_scan(
         }
         body = render_script_template(template, ctx)
         script = _make_scan_script(db, schedule, body, scan_date)
-        db.add(
-            CallTask(
-                plan=None,
-                scan_schedule=schedule,
-                customer_id=service.customer_id,
-                script=script,
-                contact=contact,
-                dial_number=phone,
-                due_at=utcnow(),
-                status="queued",
-                source=SOURCE_DUE_RENEWAL,
-                max_attempts=settings.max_call_attempts,
-                meta_json=json.dumps(
-                    _base_task_meta(
-                        schedule,
-                        service,
-                        body,
-                        due_date,
-                    ),
-                    ensure_ascii=False,
+        task = CallTask(
+            plan=None,
+            scan_schedule=schedule,
+            customer_id=service.customer_id,
+            script=script,
+            contact=contact,
+            dial_number=phone,
+            due_at=utcnow(),
+            status="queued",
+            source=SOURCE_DUE_RENEWAL,
+            max_attempts=settings.max_call_attempts,
+            meta_json=json.dumps(
+                _base_task_meta(
+                    schedule,
+                    service,
+                    body,
+                    due_date,
                 ),
-            )
+                ensure_ascii=False,
+            ),
         )
+        db.add(task)
+        db.flush()  # 拿到任务 id 供短信通知关联。
+        _maybe_enqueue_sms(db, settings, schedule, task, phone, body)
         created += 1
     db.flush()
     logger.info(
@@ -446,31 +467,32 @@ def run_device_recycle_scan(
             }
             body = render_script_template(template, ctx)
             script = _make_scan_script(db, schedule, body, scan_date)
-            db.add(
-                CallTask(
-                    plan=None,
-                    scan_schedule=schedule,
-                    customer_id=service.customer_id,
-                    script=script,
-                    contact=contact,
-                    dial_number=phone,
-                    due_at=utcnow(),
-                    status="queued",
-                    source=SOURCE_DEVICE_RECYCLE,
-                    max_attempts=settings.max_call_attempts,
-                    meta_json=json.dumps(
-                        _base_task_meta(
-                            schedule,
-                            service,
-                            body,
-                            scan_date,
-                            device_id=device.id,
-                            device_code=device.device_code,
-                        ),
-                        ensure_ascii=False,
+            task = CallTask(
+                plan=None,
+                scan_schedule=schedule,
+                customer_id=service.customer_id,
+                script=script,
+                contact=contact,
+                dial_number=phone,
+                due_at=utcnow(),
+                status="queued",
+                source=SOURCE_DEVICE_RECYCLE,
+                max_attempts=settings.max_call_attempts,
+                meta_json=json.dumps(
+                    _base_task_meta(
+                        schedule,
+                        service,
+                        body,
+                        scan_date,
+                        device_id=device.id,
+                        device_code=device.device_code,
                     ),
-                )
+                    ensure_ascii=False,
+                ),
             )
+            db.add(task)
+            db.flush()  # 拿到任务 id 供短信通知关联。
+            _maybe_enqueue_sms(db, settings, schedule, task, phone, body)
             created += 1
     db.flush()
     logger.info(
@@ -590,27 +612,28 @@ def run_review_stuck_scan(
             }
             body = render_script_template(template, ctx)
             script = _make_scan_script(db, schedule, body, scan_date)
-            db.add(
-                CallTask(
-                    plan=None,
-                    scan_schedule=schedule,
-                    customer_id=service.customer_id,
-                    script=script,
-                    contact=None,
-                    dial_number=user.phone.strip(),
-                    due_at=utcnow(),
-                    status="queued",
-                    source=SOURCE_REVIEW_STUCK,
-                    max_attempts=settings.max_call_attempts,
-                    meta_json=json.dumps(
-                        {
-                            "change_set_id": change_set.id,
-                            "rendered_script": body,
-                        },
-                        ensure_ascii=False,
-                    ),
-                )
+            task = CallTask(
+                plan=None,
+                scan_schedule=schedule,
+                customer_id=service.customer_id,
+                script=script,
+                contact=None,
+                dial_number=user.phone.strip(),
+                due_at=utcnow(),
+                status="queued",
+                source=SOURCE_REVIEW_STUCK,
+                max_attempts=settings.max_call_attempts,
+                meta_json=json.dumps(
+                    {
+                        "change_set_id": change_set.id,
+                        "rendered_script": body,
+                    },
+                    ensure_ascii=False,
+                ),
             )
+            db.add(task)
+            db.flush()  # 拿到任务 id 供短信通知关联。
+            _maybe_enqueue_sms(db, settings, schedule, task, user.phone.strip(), body)
             created += 1
     db.flush()
     logger.info(

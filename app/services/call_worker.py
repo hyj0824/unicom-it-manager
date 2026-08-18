@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from datetime import timedelta
@@ -13,13 +14,16 @@ from ..config import Settings, get_settings
 from ..database import SessionLocal
 from ..modem.client import ModemClient
 from ..modem.parser import ParsedModemLine, parse_modem_line
-from ..models import CallEvent, CallRecord, CallTask, utcnow
+from ..models import CallEvent, CallRecord, CallTask, SmsNotification, utcnow
+from .sms import SmsError, send_sms_text
 from .settings import (
     CALL_WORKER_ENABLED_KEY,
     ensure_default_settings,
     is_worker_enabled,
     set_setting,
 )
+
+logger = logging.getLogger(__name__)
 
 # 可自动重试的结果；重试上限与延迟来自配置（docs/callback-demo-plan.md 重试策略）。
 RETRYABLE_STATUSES = {"no_answer", "cancelled_or_failed", "busy", "failed"}
@@ -29,6 +33,9 @@ RETRYABLE_STATUSES = {"no_answer", "cancelled_or_failed", "busy", "failed"}
 NO_ANSWER_END_SECONDS = 80
 # 播放结束后等待对端挂断/模块上报结束的兜底时长（秒）。
 AFTER_PLAY_LINGER_SECONDS = 10
+
+# 每轮最多处理的待发短信条数；发完再进入语音任务领取，保证单通道串行。
+SMS_BATCH_LIMIT = 10
 
 END_EVENT_TYPES = {"voice_call_end", "no_carrier"}
 
@@ -90,6 +97,59 @@ class CallWorker:
             return None
         self.handle_task(db, task, commit=commit, cancel_check=cancel_check)
         return task
+
+    # ---------------------------------------------------------------- 短信发送
+
+    def process_pending_sms(self, db: Session, commit=None, limit: int = SMS_BATCH_LIMIT) -> int:
+        """空闲时发送待发短信，返回处理条数（成功/失败都计入，pending 不动不计）。
+
+        单通道约束：短信与语音共用同一个串口，本方法只在领取语音任务之前由
+        Worker 主循环调用，绝不在拨号过程中执行。SMS_ENABLED 配置关闭时不处理。
+        一次打开串口逐条发送（id 升序，最多 limit 条）：成功置 sent+sent_at，
+        失败置 failed+error_message 且 attempt+1；串口打不开等阶段级异常只记录
+        日志并返回，不影响后续语音任务领取（AGENTS.md：失败不阻塞）。
+        """
+        if not self.settings.sms_enabled:
+            return 0
+        pending = db.scalars(
+            select(SmsNotification)
+            .where(SmsNotification.status == "pending")
+            .order_by(SmsNotification.id.asc())
+            .limit(limit)
+        ).all()
+        if not pending:
+            return 0
+
+        processed = 0
+        try:
+            with ModemClient(self.settings.modem_port, self.settings.modem_baud) as modem:
+                for sms in pending:
+                    self._send_one_sms(db, sms, modem, commit=commit)
+                    processed += 1
+        except Exception as exc:  # noqa: BLE001 - 短信失败不能拖垮 Worker 循环
+            logger.warning("短信批量发送中止（串口或事务异常）：%s", exc)
+            db.rollback()
+        return processed
+
+    def _send_one_sms(self, db: Session, sms: SmsNotification, modem, commit=None) -> None:
+        """发送一条短信并落库结果；单条失败只标记该条，继续下一条。"""
+        try:
+            send_sms_text(modem, sms.phone, sms.content)
+        except SmsError as exc:
+            sms.status = "failed"
+            sms.error_message = str(exc)
+            logger.warning("短信 #%s 发送失败：%s", sms.id, exc)
+        except Exception as exc:  # noqa: BLE001 - 单条异常按失败落库，不中断批次
+            sms.status = "failed"
+            sms.error_message = f"发送异常：{exc}"
+            logger.exception("短信 #%s 发送异常", sms.id)
+        else:
+            sms.status = "sent"
+            sms.sent_at = utcnow()
+            sms.error_message = ""
+        sms.attempt += 1
+        if commit:
+            commit()
 
     def claim_next_task(self, db: Session) -> CallTask | None:
         """领取最早到期且 `queued` 的任务并置为 `dialing`（单通道：一次只领一条）。
@@ -539,6 +599,9 @@ class CallWorkerService:
             self.recover_interrupted_tasks(db)
             db.commit()
             self._recovery_done = True
+
+        # 单通道：短信与语音共用串口，先处理待发短信，再领取语音任务。
+        self.worker.process_pending_sms(db, commit=lambda: db.commit())
 
         task = self.worker.claim_next_task(db)
         db.commit()  # 尽早持久化 dialing，防止重复领取。
