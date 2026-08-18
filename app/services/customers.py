@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..models import Contact, Customer, CustomerContact
 
 # 职责为空字符串的关联视为“客户默认联系人”。v1 演示的客户表单直接维护
-# 这一条关联；正式台账中的职责使用 contact_duty 字典。
+# 这一条关联；正式台账中的职责使用 contact_duty 字典（含客户拓展职责）。
 DEFAULT_DUTY = ""
 
 

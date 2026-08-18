@@ -233,7 +233,7 @@ def _role_rows() -> list[dict]:
             "id": 5,
             "code": "system_admin",
             "name": "系统管理员",
-            "description": "用户、角色、字典、配置、导入导出、审计查看",
+            "description": "用户、角色、配置、导入导出、业务/网络审核与应用、审计查看",
         },
     ]
 

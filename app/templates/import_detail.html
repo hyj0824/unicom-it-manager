@@ -12,30 +12,136 @@
       <div><span>含重复/冲突行</span><strong>{{ batch.duplicate_count }}</strong></div>
       <div><span>缺项行</span><strong>{{ batch.missing_count }}</strong></div>
     </div>
+    {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+    <div class="import-progress" aria-label="导入流程">
+      <span class="done">上传校验</span><span class="arrow">›</span>
+      <span class="{% if batch.status in ['reviewing', 'applied'] %}done{% endif %}">提交审核</span><span class="arrow">›</span>
+      <span class="{% if batch.status == 'applied' %}done{% endif %}">应用正式台账</span>
+    </div>
+    {% if batch.status == 'ready' and not batch.error_count %}
+      <form method="post" action="/imports/{{ batch.id }}/submit" class="button-row submit-row">
+        <button class="button primary" type="submit">生成变更申请并提交审核</button>
+      </form>
+    {% elif batch.status == 'reviewing' %}
+      <p class="subtle">此批次已提交审核，请在审核中心查看处理进度。</p>
+    {% elif batch.status == 'applied' %}
+      <p class="subtle">已应用到正式台账。导入行与变更申请均保留用于追溯。</p>
+    {% endif %}
   </section>
+
+  {% if edit_row %}
+  <section class="panel">
+    <div class="panel-head correction-head">
+      <div>
+        <div class="eyebrow">暂存区 · 第 {{ edit_row.row_number }} 行</div>
+        <h2>更正暂存数据</h2>
+      </div>
+      <a class="button ghost small" href="/imports/{{ batch.id }}">取消</a>
+    </div>
+    <form method="post" action="/imports/{{ batch.id }}/rows/{{ edit_row.id }}/correct" class="correction-form">
+      <div class="correction-toolbar">
+        <label class="field-picker">
+          <span>选择字段</span>
+          <select data-correction-picker>
+            <option value="all">显示全部字段</option>
+            <optgroup label="业务字段">
+              {% for column in business_columns %}<option value="field-{{ loop.index0 }}">{{ column }}</option>{% endfor %}
+            </optgroup>
+            <optgroup label="设备字段">
+              {% for column in device_columns %}<option value="device-{{ loop.index0 }}">{{ column }}</option>{% endfor %}
+            </optgroup>
+          </select>
+        </label>
+        <p class="subtle">字典字段支持输入自定义值，也可键入关键词从候选项中模糊搜索。</p>
+      </div>
+
+      <section class="correction-domain business-domain" data-correction-domain="business">
+        <div class="domain-head"><h3>业务信息</h3><span class="domain-note">业务维护域</span></div>
+        <div class="correction-grid">
+          <label data-correction-field="field-0"><span>号码</span><input name="号码" value="{{ edit_raw.get('号码', '') }}" required></label>
+          <label data-correction-field="field-1"><span>户名</span><input name="户名" list="customer-options" autocomplete="off" value="{{ edit_raw.get('户名', '') }}"></label>
+          <label data-correction-field="field-2"><span>县分</span><input class="dictionary-input" name="县分" list="county-options" autocomplete="off" value="{{ edit_raw.get('县分', '') }}"></label>
+          <label data-correction-field="field-3"><span>网格</span><input class="dictionary-input" name="网格" list="grid-options" autocomplete="off" value="{{ edit_raw.get('网格', '') }}"></label>
+          <label data-correction-field="field-4"><span>服务状态</span><input class="dictionary-input" name="服务状态" list="service-status-options" autocomplete="off" value="{{ edit_raw.get('服务状态', '') }}"></label>
+          <label data-correction-field="field-5"><span>入网时间</span><input type="date" data-import-date name="入网时间" value="{{ edit_raw.get('入网时间', '') }}"></label>
+          <label data-correction-field="field-6"><span>协议到期时间</span><input type="date" data-import-date name="协议到期时间" value="{{ edit_raw.get('协议到期时间', '') }}"></label>
+          <label data-correction-field="field-7"><span>业务类型</span><input class="dictionary-input" name="业务类型" list="business-type-options" autocomplete="off" value="{{ edit_raw.get('业务类型', '') }}"></label>
+          <label data-correction-field="field-8"><span>渠道名称</span><input class="dictionary-input" name="渠道名称" list="channel-options" autocomplete="off" value="{{ edit_raw.get('渠道名称', '') }}"></label>
+          <label data-correction-field="field-9"><span>发展人</span><input name="发展人" list="contact-name-options" autocomplete="off" value="{{ edit_raw.get('发展人', '') }}"></label>
+          <label data-correction-field="field-10"><span>发展人联系电话</span><input name="发展人联系电话" list="contact-phone-options" autocomplete="off" value="{{ edit_raw.get('发展人联系电话', '') }}"></label>
+          <label data-correction-field="field-11"><span>客户经理</span><input name="客户经理" list="contact-name-options" autocomplete="off" value="{{ edit_raw.get('客户经理', '') }}"></label>
+          <label data-correction-field="field-12"><span>客户经理联系电话</span><input name="客户经理联系电话" list="contact-phone-options" autocomplete="off" value="{{ edit_raw.get('客户经理联系电话', '') }}"></label>
+        </div>
+      </section>
+
+      <section class="correction-domain device-domain" data-correction-domain="device">
+        <div class="domain-head"><h3>设备信息</h3><span class="domain-note">网络维护域</span></div>
+        <div class="correction-grid">
+          <label data-correction-field="device-0"><span>网络维护责任人</span><input name="网络维护责任人" list="contact-name-options" autocomplete="off" value="{{ edit_raw.get('网络维护责任人', '') }}"></label>
+          <label data-correction-field="device-1"><span>网络维护责任人联系电话</span><input name="网络维护责任人联系电话" list="contact-phone-options" autocomplete="off" value="{{ edit_raw.get('网络维护责任人联系电话', '') }}"></label>
+          <label data-correction-field="device-2"><span>设备属性</span><input class="dictionary-input" name="设备属性" list="asset-class-options" autocomplete="off" value="{{ edit_raw.get('设备属性', '') }}"></label>
+          <label data-correction-field="device-3"><span>设备编码</span><input class="dictionary-input" name="设备编码" list="device-code-options" autocomplete="off" value="{{ edit_raw.get('设备编码', '') }}"></label>
+          <label data-correction-field="device-4"><span>资产原值或物资购置价格</span><input class="dictionary-input" inputmode="decimal" name="资产原值或物资购置价格" list="asset-value-options" autocomplete="off" value="{{ edit_raw.get('资产原值或物资购置价格', '') }}"></label>
+          <label data-correction-field="device-5"><span>设备及物资类型</span><input class="dictionary-input" name="设备及物资类型" list="device-type-options" autocomplete="off" value="{{ edit_raw.get('设备及物资类型', '') }}"></label>
+          <label data-correction-field="device-6"><span>设备厂家+型号</span><input class="dictionary-input" name="设备厂家+型号" list="vendor-model-options" autocomplete="off" value="{{ edit_raw.get('设备厂家+型号', '') }}"></label>
+          <label data-correction-field="device-7"><span>设备放置地点</span><input class="dictionary-input" name="设备放置地点" list="device-location-options" autocomplete="off" value="{{ edit_raw.get('设备放置地点', '') }}"></label>
+          <label data-correction-field="device-8"><span>设备是否已回收</span><input class="dictionary-input" name="设备是否已回收" list="recovery-status-options" autocomplete="off" value="{{ edit_raw.get('设备是否已回收', '') }}"></label>
+          <label data-correction-field="device-9"><span>设备未回收原因</span><input class="dictionary-input" name="设备未回收原因" list="recovery-reason-options" autocomplete="off" value="{{ edit_raw.get('设备未回收原因', '') }}"></label>
+        </div>
+      </section>
+
+      <section class="technical-values">
+        <div><span>系统校验字段</span><strong>只读</strong><p>这些值用于识别导入版本，不参与人工更正。</p></div>
+        <div class="technical-list">
+          {% for column in import_columns[23:] %}<input type="hidden" name="{{ column }}" value="{{ edit_raw.get(column, '') }}"><code>{{ column }}：{{ edit_raw.get(column, '') or '空' }}</code>{% endfor %}
+        </div>
+      </section>
+
+      <div class="button-row correction-actions"><button class="button primary" type="submit">保存并重新校验</button><a class="button ghost" href="/imports/{{ batch.id }}">放弃更正</a></div>
+      <datalist id="customer-options">{% for customer in customers %}<option value="{{ customer.name }}">{% endfor %}</datalist>
+      <datalist id="contact-name-options">{% for contact in contact_options %}{% if contact.name %}<option value="{{ contact.name }}">{% endif %}{% endfor %}</datalist>
+      <datalist id="contact-phone-options">{% for contact in contact_options %}{% if contact.phone %}<option value="{{ contact.phone }}">{% endif %}{% endfor %}</datalist>
+      <datalist id="channel-options">{% for value in channel_options %}<option value="{{ value }}">{% endfor %}</datalist>
+      <datalist id="county-options">{% for item in counties %}<option value="{{ item.label }}">{% endfor %}</datalist>
+      <datalist id="grid-options">{% for item in grids %}<option value="{{ item.label }}">{% endfor %}</datalist>
+      <datalist id="service-status-options">{% for item in service_statuses %}<option value="{{ item.label }}">{% endfor %}</datalist>
+      <datalist id="business-type-options">{% for item in business_types %}<option value="{{ item.label }}">{% endfor %}</datalist>
+      <datalist id="asset-class-options">{% for item in asset_classes %}<option value="{{ item.label }}">{% endfor %}</datalist>
+      <datalist id="device-type-options">{% for item in device_types %}<option value="{{ item.label }}">{% endfor %}</datalist>
+      <datalist id="device-code-options">{% for value in device_codes %}<option value="{{ value }}">{% endfor %}</datalist>
+      <datalist id="vendor-model-options">{% for value in vendor_models %}<option value="{{ value }}">{% endfor %}</datalist>
+      <datalist id="device-location-options">{% for value in device_locations %}<option value="{{ value }}">{% endfor %}</datalist>
+      <datalist id="asset-value-options">{% for value in asset_values %}<option value="{{ value }}">{% endfor %}</datalist>
+      <datalist id="recovery-status-options">{% for item in recovery_statuses %}<option value="{{ item.label }}">{% endfor %}</datalist>
+      <datalist id="recovery-reason-options">{% for item in recovery_reasons %}<option value="{{ item.label }}">{% endfor %}</datalist>
+    </form>
+  </section>
+  {% endif %}
 
   <section class="panel">
     <div class="panel-head">
       <h2>暂存行明细</h2>
       <form class="filter-bar inline" method="get" action="/imports/{{ batch.id }}">
+        <input type="search" name="row_query" value="{{ row_query }}" placeholder="行号 / 业务号码 / 客户名称 / 错误信息">
         <select name="status_filter" onchange="this.form.submit()">
           <option value="">全部（{{ batch.total_rows }}）</option>
           {% for status in ["valid", "missing", "error", "duplicate"] %}
-            <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}（{{ status_counts[status] }}）</option>
+            <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status|status_label }}（{{ status_counts[status] }}）</option>
           {% endfor %}
         </select>
       </form>
     </div>
-    <table>
+    <div class="table-wrap">
+    <table class="import-table">
       <thead>
-        <tr><th>行号</th><th>业务号码</th><th>客户名称</th><th>县分</th><th>网格</th><th>校验结果</th><th>错误信息</th></tr>
+        <tr><th>行号</th><th>业务号码</th><th>客户名称</th><th>县分</th><th>网格</th><th>校验结果</th><th>错误信息</th><th>操作</th></tr>
       </thead>
       <tbody>
         {% for row in rows %}
           <tr>
             <td>{{ row.row_number }}</td>
             <td class="mono">{{ row.mapped_json|from_json_map("service_number") }}</td>
-            <td>{{ row.mapped_json|from_json_map("customer_name") }}</td>
+            <td class="cell-customer">{{ row.mapped_json|from_json_map("customer_name") }}</td>
             <td>{{ row.mapped_json|from_json_map("county") }}</td>
             <td>{{ row.mapped_json|from_json_map("grid") }}</td>
             <td>
@@ -44,15 +150,17 @@
               {% elif row.status == "duplicate" %}<span class="status-pill warning">重复</span>
               {% else %}<span class="status-pill error">错误</span>{% endif %}
             </td>
-            <td class="mono">{{ row.error_messages or "-" }}</td>
+            <td class="mono cell-error">{{ row.error_messages or "-" }}</td>
+            <td class="actions"><a class="button ghost small" href="/imports/{{ batch.id }}?edit_row_id={{ row.id }}">更正</a></td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="empty">该批次没有暂存行。</td></tr>
+          <tr><td colspan="8" class="empty">该批次没有暂存行。</td></tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
     <p class="subtle" style="padding: 0 18px 18px;">
-      原始行内容与列映射保存在暂存区，可追溯；审核通过并应用正式库的功能在后续版本提供。
+      原始行和审核变更均保存在系统中，可按批次完整追溯。
     </p>
   </section>
 {% endblock %}

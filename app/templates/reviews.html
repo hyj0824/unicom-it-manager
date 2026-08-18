@@ -8,11 +8,12 @@
         <select name="status_filter" onchange="this.form.submit()">
           <option value="">全部状态</option>
           {% for status in ["draft", "submitted", "returned", "approved", "rejected", "applied", "cancelled"] %}
-            <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}（{{ status_counts[status] }}）</option>
+            <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status|status_label }}（{{ status_counts[status] }}）</option>
           {% endfor %}
         </select>
       </form>
     </div>
+    <div class="table-wrap">
     <table>
       <thead>
         <tr><th>标题</th><th>域</th><th>状态</th><th>提交人</th><th>提交时间</th><th>原因</th></tr>
@@ -20,9 +21,9 @@
       <tbody>
         {% for change_set in change_sets %}
           <tr>
-            <td>{{ change_set.title or "-" }}</td>
-            <td>{{ change_set.domain }}</td>
-            <td><span class="status-pill muted">{{ change_set.status }}</span></td>
+            <td><a class="text-link" href="/reviews/{{ change_set.id }}">{{ change_set.title or "-" }}</a></td>
+            <td>{{ change_set.domain|domain_label }}</td>
+            <td><span class="status-pill {% if change_set.status in ['approved', 'applied'] %}ok{% elif change_set.status == 'rejected' %}error{% elif change_set.status == 'returned' %}warning{% else %}muted{% endif %}">{{ change_set.status|status_label }}</span></td>
             <td>{{ change_set.created_by_user_id or "-" }}</td>
             <td>{{ change_set.submitted_at|dt or "-" }}</td>
             <td>{{ change_set.reason or "-" }}</td>
@@ -36,5 +37,6 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
 {% endblock %}

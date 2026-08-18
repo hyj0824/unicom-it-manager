@@ -15,6 +15,7 @@ from ..models import (
     CallTask,
     CallbackPlan,
     Customer,
+    Contact,
     Script,
     utcnow,
 )
@@ -100,11 +101,13 @@ def create_plan(
     cron_expr: str,
     timezone_name: str,
     enabled: bool,
+    contact: Contact | None = None,
 ) -> CallbackPlan:
     next_run_at = compute_next_run_at(trigger_type, run_at, cron_expr, timezone_name)
     plan = CallbackPlan(
         customer=customer,
         script=script,
+        contact=contact,
         trigger_type=trigger_type,
         run_at=as_utc(run_at),
         cron_expr=cron_expr.strip(),
@@ -125,9 +128,11 @@ def update_plan(
     cron_expr: str,
     timezone_name: str,
     enabled: bool,
+    contact: Contact | None = None,
 ) -> None:
     plan.customer = customer
     plan.script = script
+    plan.contact = contact
     plan.trigger_type = trigger_type
     plan.run_at = as_utc(run_at)
     plan.cron_expr = cron_expr.strip()
@@ -145,7 +150,7 @@ def create_call_task(
     source: str = "scheduled",
 ) -> CallTask:
     settings = get_settings()
-    contact = default_customer_contact(db, plan.customer)
+    contact = plan.contact or default_customer_contact(db, plan.customer)
     dial_number = (contact.phone or "").strip() if contact else ""
     task = CallTask(
         plan=plan,

@@ -2,8 +2,8 @@
 {% block page_title %}导入导出{% endblock %}
 {% block content %}
   <div class="grid form-list">
-    <section class="panel">
-      <div class="panel-head"><h2>上传台账</h2></div>
+    <section class="panel import-start">
+      <div class="panel-head"><h2>导入业务台账</h2></div>
       {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
       <form class="stack" method="post" action="/imports/upload" enctype="multipart/form-data">
         <label>
@@ -11,15 +11,19 @@
           <input type="file" name="file" accept=".xlsx" required>
         </label>
         <p class="subtle">
-          上传后仅进入暂存区并生成校验报告（类型、重复、格式、缺项），不会直接写入正式表；
-          经审核通过后才应用。
+          系统自动识别扁平台账表头（含括号说明），生成校验、差异和缺项报告。文件只进入暂存区，
+          审核通过并应用后才会写入正式台账。
         </p>
         <button class="button primary" type="submit">上传并校验</button>
       </form>
     </section>
 
     <section class="panel">
-      <div class="panel-head"><h2>导入批次</h2></div>
+      <div class="panel-head">
+        <h2>导入批次</h2>
+        <a class="button secondary small" href="/exports/ledger.xlsx">导出扁平台账</a>
+      </div>
+      <div class="table-wrap">
       <table>
         <thead>
           <tr><th>文件</th><th>状态</th><th>总行数</th><th>错误</th><th>重复</th><th>缺项</th><th>导入时间</th><th class="actions-col">操作</th></tr>
@@ -28,7 +32,7 @@
           {% for batch in batches %}
             <tr>
               <td>{{ batch.file_name }}</td>
-              <td><span class="status-pill {% if batch.status == 'ready' %}ok{% else %}muted{% endif %}">{{ batch.status }}</span></td>
+              <td><span class="status-pill {% if batch.status in ['ready', 'applied'] %}ok{% elif batch.status == 'rejected' %}error{% else %}muted{% endif %}">{{ batch.status|status_label }}</span></td>
               <td>{{ batch.total_rows }}</td>
               <td>{% if batch.error_count %}<span class="status-pill error">{{ batch.error_count }}</span>{% else %}0{% endif %}</td>
               <td>{% if batch.duplicate_count %}<span class="status-pill warning">{{ batch.duplicate_count }}</span>{% else %}0{% endif %}</td>
@@ -41,6 +45,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </section>
   </div>
 {% endblock %}

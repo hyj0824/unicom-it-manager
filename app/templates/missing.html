@@ -4,6 +4,7 @@
   <div class="grid two">
     <section class="panel">
       <div class="panel-head"><h2>业务实例缺项</h2></div>
+      <div class="table-wrap">
       <table>
         <thead><tr><th>字段</th><th>缺失行数</th></tr></thead>
         <tbody>
@@ -17,10 +18,12 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </section>
 
     <section class="panel">
       <div class="panel-head"><h2>设备缺项</h2></div>
+      <div class="table-wrap">
       <table>
         <thead><tr><th>字段</th><th>缺失行数</th></tr></thead>
         <tbody>
@@ -34,11 +37,13 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </section>
   </div>
 
   <section class="panel">
     <div class="panel-head"><h2>含缺项的导入批次</h2></div>
+    <div class="table-wrap">
     <table>
       <thead><tr><th>文件</th><th>导入时间</th><th>总行数</th><th>缺项行数</th><th>操作</th></tr></thead>
       <tbody>
@@ -55,5 +60,6 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
 {% endblock %}

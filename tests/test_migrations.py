@@ -32,7 +32,6 @@ EXPECTED_TABLES = {
     "network_devices",
     "permissions",
     "role_permissions",
-    "role_scopes",
     "roles",
     "scripts",
     "staging_rows",
@@ -66,12 +65,12 @@ def test_upgrade_head_creates_full_schema_and_seeds(tmp_path: Path) -> None:
         )
         assert conn.execute(text("SELECT COUNT(*) FROM permissions")).scalar() == 12
         assert conn.execute(text("SELECT COUNT(*) FROM roles")).scalar() == 5
-        assert conn.execute(text("SELECT COUNT(*) FROM role_permissions")).scalar() == 21
+        assert conn.execute(text("SELECT COUNT(*) FROM role_permissions")).scalar() == 29
         assert (
             conn.execute(text("SELECT COUNT(*) FROM dictionary_categories")).scalar()
             == 10
         )
-        assert conn.execute(text("SELECT COUNT(*) FROM dictionary_items")).scalar() == 68
+        assert conn.execute(text("SELECT COUNT(*) FROM dictionary_items")).scalar() == 69
         county = conn.execute(
             text(
                 "SELECT COUNT(*) FROM dictionary_items i "

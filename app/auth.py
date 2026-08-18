@@ -3,9 +3,11 @@ from __future__ import annotations
 import hmac
 
 from fastapi import HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import get_settings
+from .models import Permission, Role, RolePermission, User, UserRole
 from .services.users import find_user, verify_password
 
 SESSION_KEY = "principal"
@@ -30,6 +32,55 @@ def require_login(request: Request) -> None:
             status_code=status.HTTP_303_SEE_OTHER,
             headers={"Location": "/login"},
         )
+
+
+def has_permission(db: Session, request: Request, permission: str, domain: str) -> bool:
+    principal = current_user(request)
+    if principal is None:
+        return False
+    if principal.get("type") == "admin":
+        return True
+    user_id = principal.get("id")
+    if not isinstance(user_id, int):
+        return False
+    user = db.get(User, user_id)
+    if user is not None and user.is_superadmin:
+        return True
+    return db.scalar(
+        select(RolePermission.role_id)
+        .join(UserRole, UserRole.role_id == RolePermission.role_id)
+        .join(Permission, Permission.id == RolePermission.permission_id)
+        .where(
+            UserRole.user_id == user_id,
+            Permission.code == permission,
+            RolePermission.domain == domain,
+        )
+    ) is not None
+
+
+def require_permission(db: Session, request: Request, permission: str, domain: str) -> None:
+    require_login(request)
+    if not has_permission(db, request, permission, domain):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="当前账号没有此操作权限。")
+
+
+def is_system_admin(db: Session, request: Request) -> bool:
+    principal = current_user(request)
+    if principal is None:
+        return False
+    if principal.get("type") == "admin":
+        return True
+    user_id = principal.get("id")
+    if not isinstance(user_id, int):
+        return False
+    user = db.get(User, user_id)
+    if user is not None and user.is_superadmin:
+        return True
+    return db.scalar(
+        select(Role.id)
+        .join(UserRole, UserRole.role_id == Role.id)
+        .where(UserRole.user_id == user_id, Role.code == "system_admin")
+    ) is not None
 
 
 def verify_credentials(db: Session, username: str, password: str) -> dict | None:

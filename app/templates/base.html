@@ -11,49 +11,47 @@
       {% set path = request.url.path %}
       <aside class="sidebar">
         <div class="brand">
-          <span class="brand-mark">政企</span>
-          <span>{{ app_title }}</span>
+          <span class="brand-mark">联通</span>
+          <span>中国联通</span>
         </div>
-        <nav class="nav">
+        <nav class="nav" aria-label="主导航">
           <a class="{% if path == '/' %}active{% endif %}" href="/">工作台</a>
-          <a class="{% if path.startswith('/ledger') %}active{% endif %}" href="/ledger">业务台账</a>
-          <a class="{% if path.startswith('/devices') %}active{% endif %}" href="/devices">网络设备</a>
-          <a class="{% if path.startswith('/customers') or path.startswith('/contacts') %}active{% endif %}" href="/customers">客户管理</a>
-          <a class="{% if path.startswith('/reviews') %}active{% endif %}" href="/reviews">审核中心</a>
-          <a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>
-          <a class="{% if path.startswith('/imports') %}active{% endif %}" href="/imports">导入导出</a>
-          <div class="nav-group">
-            <span class="nav-label">回访与通话</span>
+          <details class="nav-section" {% if path.startswith('/ledger') or path.startswith('/devices') %}open{% endif %}>
+            <summary>客户与台账</summary>
+            <a class="{% if path.startswith('/ledger') %}active{% endif %}" href="/ledger">业务台账</a>
+            <a class="{% if path.startswith('/devices') %}active{% endif %}" href="/devices">网络设备</a>
+          </details>
+          <details class="nav-section" {% if path.startswith('/reviews') or path.startswith('/missing') or path.startswith('/imports') or path.startswith('/exports') %}open{% endif %}>
+            <summary>数据管理</summary>
+            <a class="{% if path.startswith('/reviews') %}active{% endif %}" href="/reviews">审核中心</a>
+            <a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>
+            <a class="{% if path.startswith('/imports') or path.startswith('/exports') %}active{% endif %}" href="/imports">导入导出</a>
+          </details>
+          <details class="nav-section" {% if path.startswith('/contacts') or path.startswith('/plans') or path.startswith('/scripts') or path.startswith('/calls') %}open{% endif %}>
+            <summary>回访与通话</summary>
+            <a class="{% if path.startswith('/customers') or path.startswith('/contacts') %}active{% endif %}" href="/customers">通讯录</a>
             <a class="{% if path.startswith('/plans') %}active{% endif %}" href="/plans">回访计划</a>
             <a class="{% if path.startswith('/scripts') %}active{% endif %}" href="/scripts">话术管理</a>
             <a class="{% if path.startswith('/calls') %}active{% endif %}" href="/calls">通话记录</a>
-          </div>
-          <div class="nav-group">
-            <span class="nav-label">系统管理</span>
+          </details>
+          <details class="nav-section" {% if path.startswith('/admin') %}open{% endif %}>
+            <summary>系统管理</summary>
+            <a class="{% if path.startswith('/admin/system') %}active{% endif %}" href="/admin/system">系统监控</a>
             <a class="{% if path.startswith('/admin/users') %}active{% endif %}" href="/admin/users">用户管理</a>
             <a class="{% if path.startswith('/admin/roles') %}active{% endif %}" href="/admin/roles">角色权限</a>
-            <a class="{% if path.startswith('/admin/dictionaries') %}active{% endif %}" href="/admin/dictionaries">字典管理</a>
-          </div>
+          </details>
         </nav>
       </aside>
       <main class="shell">
         <header class="topbar">
           <div>
-            <div class="eyebrow">Rock Pi 3A 内网管理</div>
+            <div class="eyebrow">中国联通 · 内网运营支撑</div>
             <h1>{% block page_title %}工作台{% endblock %}</h1>
           </div>
           <div class="topbar-actions">
             {% if current_user %}
               <span class="user-chip">{{ current_user.name }}</span>
             {% endif %}
-            <span class="status-pill {% if scheduler_enabled %}ok{% else %}muted{% endif %}">
-              调度器 {{ "运行中" if scheduler_enabled else "已暂停" }}
-            </span>
-            <form method="post" action="/settings/scheduler">
-              <input type="hidden" name="enabled" value="{{ 0 if scheduler_enabled else 1 }}">
-              <input type="hidden" name="next" value="{{ request.url.path }}">
-              <button class="button secondary" type="submit">{{ "暂停调度" if scheduler_enabled else "恢复调度" }}</button>
-            </form>
             <form method="post" action="/logout">
               <button class="button ghost" type="submit">退出登录</button>
             </form>

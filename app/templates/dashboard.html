@@ -27,7 +27,7 @@
         <span>当前任务</span>
         <strong>
           {% if active_task %}
-            <span class="status-pill {{ active_task.status }}">{{ active_task.status }}</span>
+            <span class="status-pill {{ active_task.status }}">{{ active_task.status|status_label }}</span>
             {{ active_task.dial_number or "无号码" }}
           {% else %}
             空闲
@@ -56,25 +56,28 @@
       <h2>最近通话</h2>
       <a class="button secondary small" href="/calls">全部通话</a>
     </div>
+    <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>时间</th><th>客户</th><th>号码</th><th>话术</th><th>状态</th><th>时长</th></tr>
+        <tr><th>时间</th><th>客户主体</th><th>拨打负责人</th><th>电话</th><th>话术</th><th>状态</th><th>时长</th></tr>
       </thead>
       <tbody>
         {% for record in recent_records %}
           <tr>
             <td>{{ record.created_at|dt }}</td>
             <td>{{ record.customer.name }}</td>
+            <td>{{ record.contact.name if record.contact else "-" }}</td>
             <td class="mono">{{ record.dial_number or "-" }}</td>
             <td>{{ record.script.title }}</td>
-            <td><span class="status-pill {{ record.status }}">{{ record.status }}</span></td>
+            <td><span class="status-pill {{ record.status }}">{{ record.status|status_label }}</span></td>
             <td>{{ record.duration_seconds or "-" }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="6" class="empty">暂无通话记录。</td></tr>
+          <tr><td colspan="7" class="empty">暂无通话记录。</td></tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
 
   {% if recent_batches %}
@@ -83,6 +86,7 @@
         <h2>最近异常导入批次</h2>
         <a class="button secondary small" href="/imports">导入导出</a>
       </div>
+      <div class="table-wrap">
       <table>
         <thead>
           <tr><th>文件</th><th>导入时间</th><th>总行数</th><th>错误</th><th>缺项</th></tr>
@@ -99,6 +103,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </section>
   {% endif %}
 {% endblock %}

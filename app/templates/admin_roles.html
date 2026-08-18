@@ -3,6 +3,7 @@
 {% block content %}
   <section class="panel">
     <div class="panel-head"><h2>岗位角色与默认权限</h2></div>
+    <div class="table-wrap">
     <table>
       <thead>
         <tr><th>角色</th><th>说明</th><th>默认数据域</th><th>权限</th></tr>
@@ -16,7 +17,7 @@
             <td>{{ own|map(attribute="domain")|unique|join("、") or "-" }}</td>
             <td>
               {% for entry in own %}
-                <span class="status-pill muted">{{ permission_map[entry.permission_id].description }}（{{ entry.domain }}）</span>
+                <span class="status-pill muted">{{ permission_map[entry.permission_id].description }}（{{ entry.domain|domain_label }}）</span>
               {% else %}
                 <span class="subtle">未绑定权限</span>
               {% endfor %}
@@ -25,5 +26,6 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
 {% endblock %}

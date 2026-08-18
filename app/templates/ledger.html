@@ -25,39 +25,31 @@
         <div class="grid two">
           <label>
             县分
-            <select name="county_item_id">
-              <option value="">未填</option>
-              {% for item in counties %}
-                <option value="{{ item.id }}" {% if (fd.get('county_item_id') or (edit_service.county_item_id if edit_service else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
-              {% endfor %}
-            </select>
+            <input class="dictionary-input" name="county" list="county-options" autocomplete="off"
+                   value="{{ fd.get('county', edit_service.county_item.label if edit_service and edit_service.county_item else '') }}"
+                   placeholder="输入或搜索县分">
+            <datalist id="county-options">{% for item in counties %}<option value="{{ item.label }}">{% endfor %}</datalist>
           </label>
           <label>
             网格
-            <select name="grid_item_id">
-              <option value="">未填</option>
-              {% for item in grids %}
-                <option value="{{ item.id }}" {% if (fd.get('grid_item_id') or (edit_service.grid_item_id if edit_service else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
-              {% endfor %}
-            </select>
+            <input class="dictionary-input" name="grid" list="grid-options" autocomplete="off"
+                   value="{{ fd.get('grid', edit_service.grid_item.label if edit_service and edit_service.grid_item else '') }}"
+                   placeholder="输入或搜索网格">
+            <datalist id="grid-options">{% for item in grids %}<option value="{{ item.label }}">{% endfor %}</datalist>
           </label>
           <label>
             服务状态
-            <select name="service_status_item_id">
-              <option value="">未填</option>
-              {% for item in service_statuses %}
-                <option value="{{ item.id }}" {% if (fd.get('service_status_item_id') or (edit_service.service_status_item_id if edit_service else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
-              {% endfor %}
-            </select>
+            <input class="dictionary-input" name="service_status" list="service-status-options" autocomplete="off"
+                   value="{{ fd.get('service_status', edit_service.service_status_item.label if edit_service and edit_service.service_status_item else '') }}"
+                   placeholder="输入或搜索服务状态">
+            <datalist id="service-status-options">{% for item in service_statuses %}<option value="{{ item.label }}">{% endfor %}</datalist>
           </label>
           <label>
             业务类型
-            <select name="business_type_item_id">
-              <option value="">未填</option>
-              {% for item in business_types %}
-                <option value="{{ item.id }}" {% if (fd.get('business_type_item_id') or (edit_service.business_type_item_id if edit_service else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
-              {% endfor %}
-            </select>
+            <input class="dictionary-input" name="business_type" list="business-type-options" autocomplete="off"
+                   value="{{ fd.get('business_type', edit_service.business_type_item.label if edit_service and edit_service.business_type_item else '') }}"
+                   placeholder="输入或搜索业务类型">
+            <datalist id="business-type-options">{% for item in business_types %}<option value="{{ item.label }}">{% endfor %}</datalist>
           </label>
           <label>
             入网时间
@@ -100,6 +92,7 @@
         <button class="button secondary" type="submit">筛选</button>
         <a class="button ghost" href="/ledger">重置</a>
       </form>
+      <div class="table-wrap">
       <table>
         <thead>
           <tr><th>业务号码</th><th>客户</th><th>县分</th><th>网格</th><th>服务状态</th><th>业务类型</th><th>协议到期</th><th class="actions-col">操作</th></tr>
@@ -132,6 +125,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </section>
   </div>
 {% endblock %}

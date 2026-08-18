@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block page_title %}系统监控{% endblock %}
+{% block content %}
+  <nav class="tabs" aria-label="系统监控">
+    <a class="{% if tab == 'status' %}active{% endif %}" href="/admin/system?tab=status">组件状态</a>
+    <a class="{% if tab == 'logs' %}active{% endif %}" href="/admin/system?tab=logs">运行日志</a>
+    <a class="{% if tab == 'settings' %}active{% endif %}" href="/admin/system?tab=settings">相关设置</a>
+  </nav>
+
+  {% if tab == 'status' %}
+    <section class="panel">
+      <div class="panel-head">
+        <h2>定时调度器</h2>
+        <span class="status-pill {{ 'ok' if scheduler_enabled else 'muted' }}">
+          {{ '运行中' if scheduler_enabled else '已暂停' }}
+        </span>
+      </div>
+      <div class="summary-grid">
+        <div><span>进程状态</span><strong>{{ '运行' if scheduler_status.running else '未运行' }}</strong></div>
+        <div><span>最近扫描</span><strong>{{ scheduler_status.last_tick_at|dt }}</strong></div>
+        <div><span>到期计划</span><strong>每 15 秒扫描一次，仅入队不拨号</strong></div>
+      </div>
+      <div class="panel-foot">
+        <form method="post" action="/settings/scheduler">
+          <input type="hidden" name="enabled" value="{{ 0 if scheduler_enabled else 1 }}">
+          <input type="hidden" name="next" value="/admin/system?tab=status">
+          <button class="button secondary" type="submit">{{ '暂停调度' if scheduler_enabled else '恢复调度' }}</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>外呼 Call Worker</h2>
+        <span class="status-pill {{ 'ok' if worker_status.running else 'muted' }}">
+          {{ '运行中' if worker_status.running else ('已暂停' if worker_enabled else '未启用') }}
+        </span>
+      </div>
+      {% if not worker_gate %}
+        <div class="alert warning">
+          <strong>CALL_WORKER_ENABLED</strong> 未在 <code>.env</code> 中开启，Worker 进程不会启动；
+          即使下方开关为启用状态也不会拨号。确认硬件链路后再开启配置并重启服务。
+        </div>
+      {% endif %}
+      <div class="summary-grid">
+        <div><span>进程状态</span><strong>{{ '运行' if worker_status.running else '未运行' }}</strong></div>
+        <div><span>工作状态</span><strong>{{ '拨号中' if worker_status.working else '空闲' }}</strong></div>
+        <div><span>当前任务</span><strong>#{{ worker_status.task_id or '-' }} {{ worker_status.current_number or '' }}</strong></div>
+        <div><span>已处理任务</span><strong>{{ worker_status.processed }}</strong></div>
+        <div><span>最近结果</span><strong>{{ worker_status.last_result|status_label if worker_status.last_result else '-' }}</strong></div>
+        <div><span>最近错误</span><strong>{{ worker_status.last_error or '-' }}</strong></div>
+      </div>
+      <div class="panel-foot">
+        <form method="post" action="/settings/worker">
+          <input type="hidden" name="enabled" value="{{ 0 if worker_enabled else 1 }}">
+          <input type="hidden" name="next" value="/admin/system?tab=status">
+          <button class="button secondary" type="submit">{{ '暂停 Worker' if worker_enabled else '启动 Worker' }}</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>组件状态</h2></div>
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>组件</th><th>配置 / 状态</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>A7670E 串口</td>
+            <td class="mono">{{ settings.modem_port }} @ {{ settings.modem_baud }}</td>
+          </tr>
+          <tr>
+            <td>音频输出</td>
+            <td class="mono">{{ settings.audio_device }}</td>
+          </tr>
+          <tr>
+            <td>话术音频覆盖</td>
+            <td>{{ scripts_with_wav }} / {{ scripts_total }} 个话术存在可播放 WAV</td>
+          </tr>
+          <tr>
+            <td>数据库结构</td>
+            <td>
+              {% if schema.ok %}
+                <span class="status-pill ok">一致</span>
+              {% else %}
+                <span class="status-pill error">不一致</span>
+              {% endif %}
+              <span class="subtle">版本 {{ schema.current }} / 期望 {{ schema.head }}</span>
+            </td>
+          </tr>
+          <tr>
+            <td>任务队列</td>
+            <td>待拨打 <strong>{{ queue_counts.queued }}</strong> · 拨号中 <strong>{{ queue_counts.dialing }}</strong></td>
+          </tr>
+          <tr>
+            <td>今日通话记录</td>
+            <td>{{ today_records }} 条</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+  {% elif tab == 'logs' %}
+    <section class="panel">
+      <div class="panel-head">
+        <h2>通话事件</h2>
+        <form method="get" action="/admin/system" class="inline-filter">
+          <input type="hidden" name="tab" value="logs">
+          <select name="event_type" onchange="this.form.submit()">
+            <option value="">全部事件类型</option>
+            {% for et in event_types %}
+              <option value="{{ et }}" {% if et == event_type_filter %}selected{% endif %}>{{ et }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </div>
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>时间</th><th>通话记录</th><th>事件</th><th>内容 / 原始行</th></tr>
+        </thead>
+        <tbody>
+          {% for event in recent_events %}
+            <tr>
+              <td>{{ event.created_at|dt }}</td>
+              <td>
+                {% if event.call_record_id %}
+                  <a class="text-link" href="/calls/{{ event.call_record_id }}">#{{ event.call_record_id }}</a>
+                {% else %}-{% endif %}
+              </td>
+              <td><span class="status-pill muted">{{ event.event_type }}</span></td>
+              <td class="mono log-cell">{{ event.raw_line or event.message }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty">暂无通话事件。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>审计日志</h2></div>
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>时间</th><th>操作</th><th>对象</th><th>详情</th><th>IP</th></tr>
+        </thead>
+        <tbody>
+          {% for log in recent_audit %}
+            <tr>
+              <td>{{ log.created_at|dt }}</td>
+              <td><span class="status-pill muted">{{ log.action }}</span></td>
+              <td class="mono">{{ log.entity_type }}{% if log.entity_id %}#{{ log.entity_id }}{% endif %}</td>
+              <td class="log-cell">{{ log.detail_json }}</td>
+              <td class="mono">{{ log.ip_address or '-' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="empty">暂无审计日志。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+  {% else %}
+    <section class="panel">
+      <div class="panel-head"><h2>环境配置（.env）</h2></div>
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>配置项</th><th>当前值</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          {% for key, value, desc in env_settings %}
+            <tr>
+              <td class="mono">{{ key }}</td>
+              <td class="mono">{{ value }}</td>
+              <td>{{ desc }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      <div class="alert">管理员口令、会话密钥、TTS API Key 等敏感配置不在此展示；配置从 <code>.env</code> 读取，修改后需重启服务生效。</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>运行时设置</h2></div>
+      <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>设置项</th><th>当前值</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          {% for key, value, desc in runtime_settings %}
+            <tr>
+              <td class="mono">{{ key }}</td>
+              <td class="mono">{{ value }}</td>
+              <td>{{ desc }}（由「组件状态」页开关控制）</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

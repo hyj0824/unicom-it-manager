@@ -7,6 +7,7 @@
         <div class="panel-head">
           <h2>{{ category.label }} <span class="subtle mono">{{ category.code }}</span></h2>
         </div>
+        <div class="table-wrap">
         <table>
           <thead><tr><th>字典项</th><th>代码</th><th>状态</th></tr></thead>
           <tbody>
@@ -23,6 +24,7 @@
             {% endfor %}
           </tbody>
         </table>
+        </div>
       </section>
     {% endfor %}
   </div>

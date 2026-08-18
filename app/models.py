@@ -83,6 +83,7 @@ class CallbackPlan(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
     script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id"), nullable=False)
+    contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
     trigger_type: Mapped[str] = mapped_column(String(16), nullable=False)
     run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cron_expr: Mapped[str] = mapped_column(String(120), default="", nullable=False)
@@ -92,6 +93,7 @@ class CallbackPlan(TimestampMixin, Base):
 
     customer: Mapped[Customer] = relationship(back_populates="plans")
     script: Mapped[Script] = relationship(back_populates="plans")
+    contact: Mapped["Contact | None"] = relationship()
     call_tasks: Mapped[list["CallTask"]] = relationship(back_populates="plan")
     call_records: Mapped[list["CallRecord"]] = relationship(back_populates="plan")
 
@@ -167,6 +169,12 @@ class CallEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False, index=True
     )
+
+    def __init__(self, **kwargs):
+        # 事件在创建（读到串口行）时盖章，而不是 flush 时：Worker 批量提交
+        # 会把同批事件盖上同一个时间戳，掩盖真实到达顺序。
+        kwargs.setdefault("created_at", utcnow())
+        super().__init__(**kwargs)
 
     call_record: Mapped[CallRecord] = relationship(back_populates="events")
 
@@ -249,6 +257,7 @@ class Contact(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str | None] = mapped_column(String(120))
     phone: Mapped[str | None] = mapped_column(String(32), index=True)
+    duty: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -259,7 +268,7 @@ class Contact(TimestampMixin, Base):
 
 
 class CustomerContact(TimestampMixin, Base):
-    """客户与联系人的关联；职责（发展人/客户经理/网络维护责任人）挂在关联上。"""
+    """客户主体与负责人的关联；职责（含客户、发展人、客户经理、网络维护责任人）挂在关联上。"""
 
     __tablename__ = "customer_contacts"
     __table_args__ = (
@@ -391,6 +400,9 @@ class ChangeSet(TimestampMixin, Base):
         String(32), default="draft", nullable=False, index=True
     )
     reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    import_batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("import_batches.id", name="fk_change_sets_import_batch_id"), index=True
+    )
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     reviewed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     applied_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
@@ -557,22 +569,6 @@ class RolePermission(Base):
     domain: Mapped[str] = mapped_column(
         String(32), primary_key=True, default="system", nullable=False
     )
-
-
-class RoleScope(Base):
-    """角色绑定的数据范围：本人 / 指定网格 / 指定县分 / 全部。"""
-
-    __tablename__ = "role_scopes"
-    __table_args__ = (
-        UniqueConstraint("role_id", "scope_type", "scope_value", name="uq_role_scopes_binding"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    role_id: Mapped[int] = mapped_column(
-        ForeignKey("roles.id"), nullable=False, index=True
-    )
-    scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    scope_value: Mapped[str] = mapped_column(String(120), default="", nullable=False)
 
 
 class CustomFieldDefinition(TimestampMixin, Base):

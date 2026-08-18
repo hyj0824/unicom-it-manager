@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..models import DictionaryCategory, DictionaryItem
@@ -34,3 +34,45 @@ def item_label(db: Session, item_id: int | None) -> str:
         return ""
     item = db.get(DictionaryItem, item_id)
     return item.label if item else ""
+
+
+def resolve_or_create_item(
+    db: Session, category_code: str, value: str
+) -> DictionaryItem | None:
+    """Resolve a typed dictionary value, creating a controlled item when needed."""
+
+    label = " ".join(value.split())
+    if not label:
+        return None
+    if len(label) > 160:
+        raise ValueError("自定义选项不能超过 160 个字符。")
+    category = db.scalars(
+        select(DictionaryCategory).where(
+            DictionaryCategory.code == category_code,
+            DictionaryCategory.is_active.is_(True),
+        )
+    ).first()
+    if category is None:
+        raise ValueError("字典分类不存在或已停用。")
+    items = db.scalars(
+        select(DictionaryItem).where(
+            DictionaryItem.category_id == category.id,
+            DictionaryItem.is_active.is_(True),
+        )
+    ).all()
+    for item in items:
+        if item.label.casefold() == label.casefold():
+            return item
+    sort_order = db.scalar(
+        select(func.max(DictionaryItem.sort_order)).where(
+            DictionaryItem.category_id == category.id
+        )
+    ) or 0
+    item = DictionaryItem(
+        category_id=category.id,
+        label=label,
+        sort_order=sort_order + 1,
+    )
+    db.add(item)
+    db.flush()
+    return item

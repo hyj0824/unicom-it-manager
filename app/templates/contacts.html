@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block page_title %}通讯录{% endblock %}
+{% block content %}
+  <div class="grid form-list">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>{{ "编辑通讯录人员" if edit_contact else "新增通讯录人员" }}</h2>
+      </div>
+      {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+      {% set fd = form_data %}
+      <form class="stack" method="post" action="{{ '/contacts/' ~ edit_contact.id ~ '/edit' if edit_contact else '/contacts' }}">
+        <label>
+          姓名
+          <input name="name" value="{{ fd.get('name', edit_contact.name if edit_contact else '') }}" autocomplete="name" required>
+        </label>
+        <label>
+          联系电话
+          <input name="phone" value="{{ fd.get('phone', edit_contact.phone if edit_contact else '') }}" inputmode="tel" autocomplete="tel" placeholder="+?[0-9]{5,20}" required>
+        </label>
+        <label>
+          职责
+          <select name="duty">
+            <option value="">未指定</option>
+            {% for duty in duties %}
+              <option value="{{ duty.label }}" {% if fd.get('duty', edit_contact.duty if edit_contact else '') == duty.label %}selected{% endif %}>{{ duty.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="button-row">
+          <button class="button primary" type="submit">{{ "保存修改" if edit_contact else "加入通讯录" }}</button>
+          {% if edit_contact %}<a class="button ghost" href="/contacts">取消</a>{% endif %}
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>运维负责人通讯录</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>姓名</th><th>联系电话</th><th>职责</th><th class="actions-col">操作</th></tr></thead>
+          <tbody>
+            {% for contact in contacts %}
+              <tr>
+                <td>{{ contact.name or "-" }}</td>
+                <td class="mono">{{ contact.phone or "-" }}</td>
+                <td>{{ contact.duty or "未指定" }}</td>
+                <td class="actions">
+                  <a class="button secondary small" href="/contacts?edit_id={{ contact.id }}">编辑</a>
+                  <form method="post" action="/contacts/{{ contact.id }}/delete" data-confirm="停用该通讯录人员？">
+                    <button class="button danger small" type="submit">停用</button>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="4" class="empty">通讯录暂无人员。</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+{% endblock %}

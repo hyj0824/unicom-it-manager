@@ -54,6 +54,7 @@
 
     <section class="panel">
       <div class="panel-head"><h2>用户列表</h2></div>
+      <div class="table-wrap">
       <table>
         <thead>
           <tr><th>用户名</th><th>显示名称</th><th>角色</th><th>状态</th><th>最近登录</th><th class="actions-col">操作</th></tr>
@@ -73,6 +74,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       <p class="subtle" style="padding: 0 18px 18px;">
         密码使用 PBKDF2-SHA256 加盐哈希保存；停用的账号无法登录。
       </p>

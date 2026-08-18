@@ -10,7 +10,7 @@
       {% set fd = form_data %}
       <form class="stack" method="post" action="{{ '/devices/' ~ edit_device.id ~ '/edit' if edit_device else '/devices' }}">
         <label>
-          设备编码（全局唯一）
+          设备编码
           <input name="device_code" value="{{ fd.get('device_code', edit_device.device_code if edit_device else '') }}" required>
         </label>
         <label>
@@ -25,21 +25,17 @@
         <div class="grid two">
           <label>
             设备属性
-            <select name="asset_class_item_id">
-              <option value="">未填</option>
-              {% for item in asset_classes %}
-                <option value="{{ item.id }}" {% if (fd.get('asset_class_item_id') or (edit_device.asset_class_item_id if edit_device else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
-              {% endfor %}
-            </select>
+            <input class="dictionary-input" name="asset_class" list="asset-class-options" autocomplete="off"
+                   value="{{ fd.get('asset_class', edit_device.asset_class_item.label if edit_device and edit_device.asset_class_item else '') }}"
+                   placeholder="输入或搜索设备属性">
+            <datalist id="asset-class-options">{% for item in asset_classes %}<option value="{{ item.label }}">{% endfor %}</datalist>
           </label>
           <label>
             设备类型
-            <select name="device_type_item_id">
-              <option value="">未填</option>
-              {% for item in device_types %}
-                <option value="{{ item.id }}" {% if (fd.get('device_type_item_id') or (edit_device.device_type_item_id if edit_device else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
-              {% endfor %}
-            </select>
+            <input class="dictionary-input" name="device_type" list="device-type-options" autocomplete="off"
+                   value="{{ fd.get('device_type', edit_device.device_type_item.label if edit_device and edit_device.device_type_item else '') }}"
+                   placeholder="输入或搜索设备类型">
+            <datalist id="device-type-options">{% for item in device_types %}<option value="{{ item.label }}">{% endfor %}</datalist>
           </label>
           <label>
             资产原值/购置价格
@@ -47,21 +43,17 @@
           </label>
           <label>
             回收状态
-            <select name="recovery_status_item_id">
-              <option value="">未填</option>
-              {% for item in recovery_statuses %}
-                <option value="{{ item.id }}" {% if (fd.get('recovery_status_item_id') or (edit_device.recovery_status_item_id if edit_device else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
-              {% endfor %}
-            </select>
+            <input class="dictionary-input" name="recovery_status" list="recovery-status-options" autocomplete="off"
+                   value="{{ fd.get('recovery_status', edit_device.recovery_status_item.label if edit_device and edit_device.recovery_status_item else '') }}"
+                   placeholder="输入或搜索回收状态">
+            <datalist id="recovery-status-options">{% for item in recovery_statuses %}<option value="{{ item.label }}">{% endfor %}</datalist>
           </label>
           <label>
             回收原因
-            <select name="recovery_reason_item_id">
-              <option value="">未填</option>
-              {% for item in recovery_reasons %}
-                <option value="{{ item.id }}" {% if (fd.get('recovery_reason_item_id') or (edit_device.recovery_reason_item_id if edit_device else ''))|string == item.id|string %}selected{% endif %}>{{ item.label }}</option>
-              {% endfor %}
-            </select>
+            <input class="dictionary-input" name="recovery_reason" list="recovery-reason-options" autocomplete="off"
+                   value="{{ fd.get('recovery_reason', edit_device.recovery_reason_item.label if edit_device and edit_device.recovery_reason_item else '') }}"
+                   placeholder="输入或搜索回收原因">
+            <datalist id="recovery-reason-options">{% for item in recovery_reasons %}<option value="{{ item.label }}">{% endfor %}</datalist>
           </label>
           <label>
             维护责任人
@@ -103,6 +95,7 @@
         <button class="button secondary" type="submit">筛选</button>
         <a class="button ghost" href="/devices">重置</a>
       </form>
+      <div class="table-wrap">
       <table>
         <thead>
           <tr><th>设备编码</th><th>所属业务</th><th>属性</th><th>厂家+型号</th><th>放置地点</th><th>回收状态</th><th class="actions-col">操作</th></tr>
@@ -134,6 +127,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </section>
   </div>
 {% endblock %}

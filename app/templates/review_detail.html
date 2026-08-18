@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block page_title %}审核申请{% endblock %}
+{% block content %}
+  <section class="panel review-hero">
+    <div class="panel-head">
+      <div>
+        <div class="eyebrow">{{ change_set.domain == 'business' and '业务台账变更' or change_set.domain }}</div>
+        <h2>{{ change_set.title }}</h2>
+      </div>
+      <span class="status-pill {% if change_set.status in ['approved', 'applied'] %}ok{% elif change_set.status == 'rejected' %}error{% elif change_set.status == 'returned' %}warning{% else %}muted{% endif %}">{{ change_set.status|status_label }}</span>
+    </div>
+    <div class="review-meta">
+      <span>提交人 ID：{{ change_set.created_by_user_id or '-' }}</span>
+      <span>提交时间：{{ change_set.submitted_at|dt or '-' }}</span>
+      <span>条目数：{{ previews|length }}</span>
+    </div>
+    {% if change_set.reason %}<p class="subtle">说明：{{ change_set.reason }}</p>{% endif %}
+    {% if related_change_sets %}
+      <p class="subtle">同一导入批次的其他域申请：{% for related in related_change_sets %}<a class="text-link" href="/reviews/{{ related.id }}">{{ related.domain|domain_label }}审核（{{ related.status|status_label }}）</a>{% if not loop.last %}、{% endif %}{% endfor %}</p>
+    {% endif %}
+    {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+    {% if can_review %}
+      <form class="review-actions" method="post" action="/reviews/{{ change_set.id }}/decision">
+        <label>审核说明 / 退回原因<input name="reason" placeholder="退回时必填"></label>
+        {% if is_self_submission %}
+          <label class="check"><input name="self_review_confirmed" type="checkbox" value="1" required> 我确认本次为自提交、自审核，已核对全部字段差异。</label>
+        {% endif %}
+        <div class="button-row">
+          <button class="button primary" name="decision" value="approved" type="submit">审核通过</button>
+          <button class="button secondary" name="decision" value="returned" type="submit">退回补充</button>
+          <button class="button danger" name="decision" value="rejected" type="submit" data-confirm="驳回后该批次不能直接应用，确认继续？">驳回申请</button>
+        </div>
+      </form>
+    {% endif %}
+    {% if can_apply %}
+      <form method="post" action="/reviews/{{ change_set.id }}/apply" class="button-row">
+        <button class="button primary" type="submit" data-confirm="将以当前版本检查后一次性应用全部变更，确认继续？">应用到正式台账</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>字段差异</h2><a class="button ghost small" href="/reviews">返回审核中心</a></div>
+    <div class="change-list">
+      {% for preview in previews %}
+        <article class="change-item">
+          <div class="change-item-head">
+            <strong>第 {{ preview.payload.row_numbers|join('、') }} 行 · {{ "新增" if preview.item.operation == "create" else "更新" }}{{ preview.item.entity_type == "network_device" and "设备" or "业务" }}</strong>
+            <span class="status-pill {% if preview.payload.row_status == 'missing' %}short_call{% else %}ok{% endif %}">{{ preview.payload.row_status|status_label }}</span>
+          </div>
+          <div class="diff-grid">
+            <div><span>当前正式值</span>{% for key, value in preview.current.items() %}<p><b>{{ key }}</b>{{ value or '-' }}</p>{% else %}<p class="subtle">新增记录</p>{% endfor %}</div>
+            <div><span>提交值</span>{% for key, value in preview.proposed.items() %}<p class="{% if key in preview.changed_fields %}changed{% endif %}"><b>{{ key }}</b>{{ value or '-' }}</p>{% endfor %}</div>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}

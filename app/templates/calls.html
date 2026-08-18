@@ -5,12 +5,14 @@
     <div class="panel-head">
       <h2>任务队列</h2>
     </div>
+    <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th>执行时间</th>
-          <th>客户</th>
-          <th>号码</th>
+          <th>客户主体</th>
+          <th>拨打负责人</th>
+          <th>电话</th>
           <th>话术</th>
           <th>状态</th>
           <th>尝试</th>
@@ -22,29 +24,33 @@
           <tr>
             <td>{{ task.due_at|dt }}</td>
             <td>{{ task.customer.name }}</td>
+            <td>{{ task.contact.name if task.contact else "-" }}</td>
             <td class="mono">{{ task.dial_number or "-" }}</td>
             <td>{{ task.script.title }}</td>
-            <td><span class="status-pill {{ task.status }}">{{ task.status }}</span></td>
+            <td><span class="status-pill {{ task.status }}">{{ task.status|status_label }}</span></td>
             <td>{{ task.attempt }}/{{ task.max_attempts }}</td>
             <td>{{ task.error_message or "-" }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="empty">暂无排队任务。</td></tr>
+          <tr><td colspan="8" class="empty">暂无排队任务。</td></tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
 
   <section class="panel">
     <div class="panel-head">
       <h2>通话记录</h2>
     </div>
+    <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th>创建时间</th>
-          <th>客户</th>
-          <th>号码</th>
+          <th>客户主体</th>
+          <th>拨打负责人</th>
+          <th>电话</th>
           <th>话术</th>
           <th>状态</th>
           <th>接通时间</th>
@@ -57,17 +63,19 @@
           <tr>
             <td>{{ record.created_at|dt }}</td>
             <td>{{ record.customer.name }}</td>
+            <td>{{ record.contact.name if record.contact else "-" }}</td>
             <td class="mono">{{ record.dial_number or "-" }}</td>
             <td>{{ record.script.title }}</td>
-            <td><span class="status-pill {{ record.status }}">{{ record.status }}</span></td>
+            <td><span class="status-pill {{ record.status }}">{{ record.status|status_label }}</span></td>
             <td>{{ record.connected_at|dt }}</td>
             <td>{{ record.duration_seconds or "-" }}</td>
             <td class="actions"><a class="button secondary small" href="/calls/{{ record.id }}">详情</a></td>
           </tr>
         {% else %}
-          <tr><td colspan="8" class="empty">暂无通话记录。</td></tr>
+          <tr><td colspan="9" class="empty">暂无通话记录。</td></tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
 {% endblock %}

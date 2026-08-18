@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import uuid
 from contextlib import asynccontextmanager
@@ -8,10 +9,10 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -23,8 +24,9 @@ from .config import (
     get_settings,
     validate_runtime_settings,
 )
-from .database import SessionLocal, check_schema_current, get_db
+from .database import SessionLocal, check_schema_current, get_db, get_schema_head
 from .models import (
+    AuditLog,
     CallEvent,
     CallRecord,
     CallTask,
@@ -34,6 +36,7 @@ from .models import (
     Customer,
     CustomerContact,
     BusinessService,
+    DictionaryItem,
     ImportBatch,
     NetworkDevice,
     Role,
@@ -47,14 +50,18 @@ from .models import (
 from .scheduler import scheduler_service
 from .services import imports as import_service
 from .services import ledger as ledger_service
+from .services import reviews as review_service
 from .services import plans as plan_service
+from .services.call_worker import call_worker_service
 from .services.customers import customer_phone_map
-from .services.dictionaries import active_items, categories_with_items
+from .services.dictionaries import active_items, resolve_or_create_item
 from .services.scripts import generate_script_audio
 from .services.settings import (
     SCHEDULER_ENABLED_KEY,
+    CALL_WORKER_ENABLED_KEY,
     ensure_default_settings,
     is_scheduler_enabled,
+    is_worker_enabled,
     set_setting,
 )
 from .services.users import hash_password, role_names, set_user_roles
@@ -63,7 +70,44 @@ from .services.users import hash_password, role_names, set_user_roles
 settings = get_settings()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-APP_TITLE = "政企专租线台账"
+APP_TITLE = "中国联通 IT 运维客户信息管理系统"
+
+STATUS_LABELS = {
+    "uploaded": "已上传",
+    "validating": "校验中",
+    "ready": "待提交",
+    "reviewing": "审核中",
+    "applied": "已应用",
+    "rejected": "已驳回",
+    "draft": "草稿",
+    "submitted": "待审核",
+    "returned": "已退回",
+    "approved": "已通过",
+    "cancelled": "已取消",
+    "valid": "正常",
+    "missing": "缺项",
+    "error": "错误",
+    "duplicate": "冲突",
+    "queued": "待拨打",
+    "dialing": "拨号中",
+    "connected": "已接通",
+    "no_answer": "无人接听",
+    "rejected": "疑似拒接",
+    "cancelled_or_failed": "已取消或失败",
+    "busy": "忙线",
+    "short_call": "有效时长不足",
+    "failed": "失败",
+    "completed": "已完成",
+    "missed": "已错过",
+}
+
+DOMAIN_LABELS = {
+    "business": "业务",
+    "network": "网络",
+    "callback": "回访",
+    "template": "话术",
+    "system": "系统",
+}
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -82,12 +126,40 @@ def format_dt(value: datetime | None, timezone_name: str | None = None) -> str:
     return value.astimezone(zone).strftime("%Y-%m-%d %H:%M")
 
 
+def format_dt_seconds(value: datetime | None, timezone_name: str | None = None) -> str:
+    """带秒的时间格式，用于通话详情事件时间线。
+
+    事件在创建时盖章（见 `CallEvent.__init__`），实测关键事件间隔为秒级
+    （拨出→响铃 1.3s、响铃期 13.9s 等），秒级显示即可分辨。
+    """
+    value = _as_utc(value)
+    if value is None:
+        return "-"
+    zone = plan_service.get_zone(timezone_name or settings.default_timezone)
+    return value.astimezone(zone).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def format_date(value: datetime | None, timezone_name: str | None = None) -> str:
     value = _as_utc(value)
     if value is None:
         return ""
     zone = plan_service.get_zone(timezone_name or settings.default_timezone)
     return value.astimezone(zone).strftime("%Y-%m-%d")
+
+
+def html_date_value(value: object) -> str:
+    """Normalize imported date text for an HTML date input."""
+
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    text = str(value).strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    return text
 
 
 def datetime_local_filter(value: datetime | None, timezone_name: str | None = None) -> str:
@@ -105,10 +177,21 @@ def from_json_map(value: str, key: str) -> str:
     return str(result) if result else "-"
 
 
+def status_label(value: str) -> str:
+    return STATUS_LABELS.get(value, value or "-")
+
+
+def domain_label(value: str) -> str:
+    return DOMAIN_LABELS.get(value, value or "-")
+
+
 templates.env.filters["dt"] = format_dt
+templates.env.filters["dt_s"] = format_dt_seconds
 templates.env.filters["date"] = format_date
 templates.env.filters["datetime_local"] = datetime_local_filter
 templates.env.filters["from_json_map"] = from_json_map
+templates.env.filters["status_label"] = status_label
+templates.env.filters["domain_label"] = domain_label
 
 
 @asynccontextmanager
@@ -121,7 +204,9 @@ async def lifespan(app: FastAPI):
         ensure_default_settings(db)
         db.commit()
     scheduler_service.start()
+    call_worker_service.start()
     yield
+    call_worker_service.shutdown()
     scheduler_service.shutdown()
 
 
@@ -192,11 +277,25 @@ def _form_float(form, key: str) -> float | None:
         raise ValueError(f"{key} 必须是数字。") from None
 
 
+def _dictionary_value_id(db: Session, category: str, value: str) -> int | None:
+    item = resolve_or_create_item(db, category, value)
+    return item.id if item is not None else None
+
+
 def _user_id(request: Request) -> int | None:
     principal = auth.current_user(request)
     if principal and principal.get("type") == "user":
         return principal.get("id")
     return None
+
+
+def _is_self_submission(request: Request, change_set: ChangeSet) -> bool:
+    principal = auth.current_user(request)
+    if principal is None:
+        return False
+    if principal.get("type") == "admin":
+        return change_set.created_by_user_id is None
+    return change_set.created_by_user_id == _user_id(request)
 
 
 def _client_ip(request: Request) -> str:
@@ -343,6 +442,16 @@ async def scheduler_toggle(request: Request, db: Session = Depends(get_db)):
     return redirect_to(str(form.get("next", "/")))
 
 
+@app.post("/settings/worker")
+async def worker_toggle(request: Request, db: Session = Depends(get_db)):
+    auth.require_login(request)
+    form = await request.form()
+    enabled = str(form.get("enabled", "0")) == "1"
+    call_worker_service.set_enabled(db, enabled)
+    db.commit()
+    return redirect_to(str(form.get("next", "/admin/system")))
+
+
 # ---------------------------------------------------------------- 客户与联系人
 
 
@@ -383,6 +492,52 @@ def customers_template(
     )
 
 
+def contacts_template(
+    request: Request,
+    db: Session,
+    error: str = "",
+    form_data: dict[str, str] | None = None,
+    edit_contact: Contact | None = None,
+    status_code: int = 200,
+):
+    contacts = db.scalars(
+        select(Contact).where(Contact.is_active.is_(True)).order_by(Contact.name.asc(), Contact.id.asc())
+    ).all()
+    return render(
+        request,
+        "contacts.html",
+        db,
+        status_code=status_code,
+        contacts=contacts,
+        duties=active_items(db, "contact_duty"),
+        edit_contact=edit_contact,
+        form_data=form_data or {},
+        error=error,
+    )
+
+
+@app.get("/contacts")
+def contacts_page(request: Request, edit_id: int | None = None, db: Session = Depends(get_db)):
+    auth.require_login(request)
+    return contacts_template(request, db, edit_contact=db.get(Contact, edit_id) if edit_id else None)
+
+
+@app.post("/contacts")
+async def directory_contact_create(request: Request, db: Session = Depends(get_db)):
+    auth.require_login(request)
+    form = await request.form()
+    name = str(form.get("name", "")).strip()
+    phone = str(form.get("phone", "")).strip()
+    duty = str(form.get("duty", "")).strip()
+    if not name or not phone:
+        return contacts_template(request, db, "姓名和联系电话不能为空。", dict(form), status_code=400)
+    if not plan_service.validate_phone(phone):
+        return contacts_template(request, db, "电话格式不正确（应为 +?[0-9]{5,20}）。", dict(form), status_code=400)
+    db.add(Contact(name=name, phone=phone, duty=duty))
+    db.commit()
+    return redirect_to("/contacts")
+
+
 @app.get("/customers")
 def customers_page(
     request: Request,
@@ -391,10 +546,7 @@ def customers_page(
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
-    edit_customer = db.get(Customer, edit_id) if edit_id else None
-    return customers_template(
-        request, db, edit_customer=edit_customer, edit_contact_id=edit_contact_id
-    )
+    return redirect_to("/contacts")
 
 
 @app.post("/customers")
@@ -478,56 +630,29 @@ async def contact_update(contact_id: int, request: Request, db: Session = Depend
     auth.require_login(request)
     contact = get_or_404(db, Contact, contact_id)
     form = await request.form()
-    customer_id = _form_int(form, "customer_id")
     name = str(form.get("name", "")).strip()
     phone = str(form.get("phone", "")).strip()
     duty = str(form.get("duty", "")).strip()
+    form_data = {"name": name, "phone": phone, "duty": duty}
+    if not name or not phone:
+        return contacts_template(request, db, "姓名和联系电话不能为空。", form_data, edit_contact=contact, status_code=400)
     if phone and not plan_service.validate_phone(phone):
-        return customers_template(
-            request,
-            db,
-            contact_error="电话格式不正确（应为 +?[0-9]{5,20}）。",
-            contact_form={"name": name, "phone": phone, "duty": duty},
-            edit_customer=db.get(Customer, customer_id) if customer_id else None,
-            edit_contact_id=contact.id,
-            status_code=400,
-        )
+        return contacts_template(request, db, "电话格式不正确（应为 +?[0-9]{5,20}）。", form_data, edit_contact=contact, status_code=400)
     contact.name = name or None
     contact.phone = phone or None
+    contact.duty = duty
     contact.version += 1
-    if customer_id is not None:
-        link = db.scalars(
-            select(CustomerContact).where(
-                CustomerContact.customer_id == customer_id,
-                CustomerContact.contact_id == contact.id,
-            )
-        ).first()
-        if link is not None:
-            link.duty = duty
     db.commit()
-    return redirect_to(f"/customers?edit_id={customer_id or ''}")
+    return redirect_to("/contacts")
 
 
 @app.post("/contacts/{contact_id}/delete")
 def contact_delete(contact_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
     contact = get_or_404(db, Contact, contact_id)
-    form = None
-    customer_id = request.query_params.get("customer_id")
-    try:
-        db.delete(contact)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        customer = db.get(Customer, int(customer_id)) if customer_id else None
-        return customers_template(
-            request,
-            db,
-            contact_error="该联系人被通话任务引用，不能删除。",
-            edit_customer=customer,
-            status_code=400,
-        )
-    return redirect_to(f"/customers?edit_id={customer_id or ''}")
+    contact.is_active = False
+    db.commit()
+    return redirect_to("/contacts")
 
 
 # ---------------------------------------------------------------- 业务台账
@@ -602,10 +727,10 @@ def _parse_service_form(form) -> dict:
     return {
         "service_number": str(form.get("service_number", "")).strip(),
         "customer_id": _form_int(form, "customer_id"),
-        "county_item_id": _form_int(form, "county_item_id"),
-        "grid_item_id": _form_int(form, "grid_item_id"),
-        "service_status_item_id": _form_int(form, "service_status_item_id"),
-        "business_type_item_id": _form_int(form, "business_type_item_id"),
+        "county": str(form.get("county", "")).strip(),
+        "grid": str(form.get("grid", "")).strip(),
+        "service_status": str(form.get("service_status", "")).strip(),
+        "business_type": str(form.get("business_type", "")).strip(),
         "channel_name": str(form.get("channel_name", "")).strip(),
         "accessed_at": ledger_service.parse_local_date(
             str(form.get("accessed_at", "")), settings.default_timezone
@@ -626,10 +751,10 @@ def _apply_service_form(service: BusinessService, data: dict, db: Session) -> st
         return "必须选择客户。"
     service.service_number = data["service_number"]
     service.customer_id = data["customer_id"]
-    service.county_item_id = data["county_item_id"]
-    service.grid_item_id = data["grid_item_id"]
-    service.service_status_item_id = data["service_status_item_id"]
-    service.business_type_item_id = data["business_type_item_id"]
+    service.county_item_id = _dictionary_value_id(db, "county", data["county"])
+    service.grid_item_id = _dictionary_value_id(db, "grid", data["grid"])
+    service.service_status_item_id = _dictionary_value_id(db, "service_status", data["service_status"])
+    service.business_type_item_id = _dictionary_value_id(db, "business_type", data["business_type"])
     service.channel_name = data["channel_name"]
     service.accessed_at = data["accessed_at"]
     service.agreement_expires_at = data["agreement_expires_at"]
@@ -641,11 +766,14 @@ def _apply_service_form(service: BusinessService, data: dict, db: Session) -> st
 async def service_create(request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
     form = await request.form()
-    data = _parse_service_form(form)
-    service = BusinessService(
-        service_number="", customer_id=data["customer_id"] or 0
-    )
-    error = _apply_service_form(service, data, db)
+    try:
+        data = _parse_service_form(form)
+        service = BusinessService(
+            service_number="", customer_id=data["customer_id"] or 0
+        )
+        error = _apply_service_form(service, data, db)
+    except ValueError as exc:
+        return ledger_template(request, db, str(exc), dict(form), status_code=400)
     if error:
         return ledger_template(request, db, error, dict(form), status_code=400)
     db.add(service)
@@ -664,8 +792,11 @@ async def service_update(service_id: int, request: Request, db: Session = Depend
     auth.require_login(request)
     service = get_or_404(db, BusinessService, service_id)
     form = await request.form()
-    data = _parse_service_form(form)
-    error = _apply_service_form(service, data, db)
+    try:
+        data = _parse_service_form(form)
+        error = _apply_service_form(service, data, db)
+    except ValueError as exc:
+        return ledger_template(request, db, str(exc), dict(form), edit_service=service, status_code=400)
     if error:
         return ledger_template(request, db, error, dict(form), edit_service=service, status_code=400)
     db.commit()
@@ -760,10 +891,10 @@ def _parse_device_form(form) -> dict:
     return {
         "device_code": str(form.get("device_code", "")).strip(),
         "business_service_id": _form_int(form, "business_service_id"),
-        "asset_class_item_id": _form_int(form, "asset_class_item_id"),
-        "device_type_item_id": _form_int(form, "device_type_item_id"),
-        "recovery_status_item_id": _form_int(form, "recovery_status_item_id"),
-        "recovery_reason_item_id": _form_int(form, "recovery_reason_item_id"),
+        "asset_class": str(form.get("asset_class", "")).strip(),
+        "device_type": str(form.get("device_type", "")).strip(),
+        "recovery_status": str(form.get("recovery_status", "")).strip(),
+        "recovery_reason": str(form.get("recovery_reason", "")).strip(),
         "maintenance_contact_id": _form_int(form, "maintenance_contact_id"),
         "vendor_model": str(form.get("vendor_model", "")).strip(),
         "location": str(form.get("location", "")).strip(),
@@ -779,10 +910,10 @@ def _apply_device_form(device: NetworkDevice, data: dict, db: Session) -> str | 
         return "必须选择所属业务。"
     device.device_code = data["device_code"]
     device.business_service_id = data["business_service_id"]
-    device.asset_class_item_id = data["asset_class_item_id"]
-    device.device_type_item_id = data["device_type_item_id"]
-    device.recovery_status_item_id = data["recovery_status_item_id"]
-    device.recovery_reason_item_id = data["recovery_reason_item_id"]
+    device.asset_class_item_id = _dictionary_value_id(db, "asset_class", data["asset_class"])
+    device.device_type_item_id = _dictionary_value_id(db, "device_type", data["device_type"])
+    device.recovery_status_item_id = _dictionary_value_id(db, "recovery_status", data["recovery_status"])
+    device.recovery_reason_item_id = _dictionary_value_id(db, "recovery_reason", data["recovery_reason"])
     device.maintenance_contact_id = data["maintenance_contact_id"]
     device.vendor_model = data["vendor_model"]
     device.location = data["location"]
@@ -797,10 +928,10 @@ async def device_create(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     try:
         data = _parse_device_form(form)
+        device = NetworkDevice(device_code="", business_service_id=data["business_service_id"] or 0)
+        error = _apply_device_form(device, data, db)
     except ValueError as exc:
         return devices_template(request, db, str(exc), dict(form), status_code=400)
-    device = NetworkDevice(device_code="", business_service_id=data["business_service_id"] or 0)
-    error = _apply_device_form(device, data, db)
     if error:
         return devices_template(request, db, error, dict(form), status_code=400)
     db.add(device)
@@ -815,9 +946,9 @@ async def device_update(device_id: int, request: Request, db: Session = Depends(
     form = await request.form()
     try:
         data = _parse_device_form(form)
+        error = _apply_device_form(device, data, db)
     except ValueError as exc:
         return devices_template(request, db, str(exc), dict(form), edit_device=device, status_code=400)
-    error = _apply_device_form(device, data, db)
     if error:
         return devices_template(request, db, error, dict(form), edit_device=device, status_code=400)
     db.commit()
@@ -840,6 +971,11 @@ def device_delete(device_id: int, request: Request, db: Session = Depends(get_db
 def reviews_page(request: Request, status_filter: str = "", db: Session = Depends(get_db)):
     auth.require_login(request)
     query = select(ChangeSet).order_by(ChangeSet.created_at.desc()).limit(200)
+    allowed_domains = [domain for domain in ("business", "network", "callback", "template", "system") if auth.has_permission(db, request, "read", domain)]
+    if allowed_domains:
+        query = query.where(ChangeSet.domain.in_(allowed_domains))
+    else:
+        query = query.where(False)
     if status_filter:
         query = query.where(ChangeSet.status == status_filter)
     change_sets = db.scalars(query).all()
@@ -903,13 +1039,13 @@ def imports_template(
 
 @app.get("/imports")
 def imports_page(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "import", "system")
     return imports_template(request, db)
 
 
 @app.post("/imports/upload")
 async def import_upload(request: Request, file: UploadFile, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "import", "system")
     filename = file.filename or ""
     if not filename.lower().endswith(".xlsx"):
         return imports_template(request, db, "只支持 .xlsx 文件。", status_code=400)
@@ -949,16 +1085,31 @@ def import_detail(
     batch_id: int,
     request: Request,
     status_filter: str = "",
+    row_query: str = "",
+    edit_row_id: int | None = None,
+    error: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "import", "system")
     batch = get_or_404(db, ImportBatch, batch_id)
     query = select(StagingRow).where(StagingRow.batch_id == batch.id).order_by(
         StagingRow.row_number.asc()
     )
     if status_filter:
         query = query.where(StagingRow.status == status_filter)
-    rows = db.scalars(query.limit(500)).all()
+    all_rows = db.scalars(query).all()
+    if row_query.strip():
+        needle = row_query.strip().casefold()
+        rows = []
+        for row in all_rows:
+            haystack = " ".join(
+                [str(row.row_number), row.error_messages or "", row.mapped_json or "", row.raw_json or ""]
+            ).casefold()
+            if needle in haystack:
+                rows.append(row)
+        rows = rows[:500]
+    else:
+        rows = all_rows[:500]
     status_counts = {
         name: db.scalar(
             select(func.count(StagingRow.id)).where(
@@ -967,6 +1118,34 @@ def import_detail(
         ) or 0
         for name in ["valid", "missing", "error", "duplicate"]
     }
+    edit_row = db.get(StagingRow, edit_row_id) if edit_row_id else None
+    if edit_row is not None and edit_row.batch_id != batch.id:
+        edit_row = None
+    edit_raw = {}
+    if edit_row is not None:
+        edit_payload = json.loads(edit_row.mapped_json or "{}")
+        edit_raw = edit_payload.get("manual_raw", json.loads(edit_row.raw_json or "{}"))
+        for field in ("入网时间", "协议到期时间"):
+            edit_raw[field] = html_date_value(edit_raw.get(field, ""))
+    customers = db.scalars(select(Customer).where(Customer.is_active.is_(True)).order_by(Customer.name.asc())).all()
+    channel_options = [value for value in db.scalars(
+        select(BusinessService.channel_name).where(BusinessService.channel_name != "").distinct().order_by(BusinessService.channel_name)
+    ).all() if value]
+    device_codes = [value for value in db.scalars(
+        select(NetworkDevice.device_code).where(NetworkDevice.device_code != "").distinct().order_by(NetworkDevice.device_code)
+    ).all() if value]
+    vendor_models = [value for value in db.scalars(
+        select(NetworkDevice.vendor_model).where(NetworkDevice.vendor_model != "").distinct().order_by(NetworkDevice.vendor_model)
+    ).all() if value]
+    device_locations = [value for value in db.scalars(
+        select(NetworkDevice.location).where(NetworkDevice.location != "").distinct().order_by(NetworkDevice.location)
+    ).all() if value]
+    asset_values = [str(value) for value in db.scalars(
+        select(NetworkDevice.asset_value).where(NetworkDevice.asset_value.is_not(None)).distinct().order_by(NetworkDevice.asset_value)
+    ).all() if value is not None]
+    directory_contacts = db.scalars(
+        select(Contact).where(Contact.is_active.is_(True)).order_by(Contact.name.asc(), Contact.id.asc())
+    ).all()
     return render(
         request,
         "import_detail.html",
@@ -974,7 +1153,271 @@ def import_detail(
         batch=batch,
         rows=rows,
         status_filter=status_filter,
+        row_query=row_query,
         status_counts=status_counts,
+        edit_row=edit_row,
+        edit_raw=edit_raw,
+        import_columns=import_service.LEDGER_COLUMNS + import_service.TECHNICAL_COLUMNS,
+        business_columns=import_service.BUSINESS_COLUMNS,
+        device_columns=import_service.DEVICE_COLUMNS,
+        customers=customers,
+        counties=active_items(db, "county"),
+        grids=active_items(db, "grid"),
+        service_statuses=active_items(db, "service_status"),
+        business_types=active_items(db, "business_type"),
+        asset_classes=active_items(db, "asset_class"),
+        device_types=active_items(db, "device_type"),
+        recovery_statuses=active_items(db, "recovery_status"),
+        recovery_reasons=active_items(db, "recovery_reason"),
+        contact_options=directory_contacts,
+        channel_options=channel_options,
+        device_codes=device_codes,
+        vendor_models=vendor_models,
+        device_locations=device_locations,
+        asset_values=asset_values,
+        error=error,
+    )
+
+
+@app.post("/imports/{batch_id}/submit")
+def import_submit(batch_id: int, request: Request, db: Session = Depends(get_db)):
+    auth.require_permission(db, request, "import", "system")
+    auth.require_permission(db, request, "submit", "business")
+    auth.require_permission(db, request, "submit", "network")
+    batch = get_or_404(db, ImportBatch, batch_id)
+    try:
+        change_sets = review_service.build_import_change_sets(db, batch, _user_id(request))
+        ledger_service.log_action(
+            db,
+            "submit_review",
+            _user_id(request),
+            "import_batch", batch.id,
+            json.dumps({"change_set_ids": [item.id for item in change_sets]}, ensure_ascii=False),
+            _client_ip(request),
+        )
+        db.commit()
+    except review_service.ChangeApplicationError as exc:
+        db.rollback()
+        return import_detail(batch_id, request, error=str(exc), db=db)
+    return redirect_to(f"/reviews/{change_sets[0].id}")
+
+
+@app.post("/imports/{batch_id}/rows/{row_id}/correct")
+async def import_row_correct(batch_id: int, row_id: int, request: Request, db: Session = Depends(get_db)):
+    auth.require_permission(db, request, "import", "system")
+    batch = get_or_404(db, ImportBatch, batch_id)
+    if batch.status != "ready":
+        return import_detail(batch_id, request, error="只有待提交批次可以更正暂存行。", db=db, status_code=400)
+    form = await request.form()
+    try:
+        import_service.revalidate_staging_row(
+            db, batch, row_id,
+            {column: str(form.get(column, "")) for column in import_service.LEDGER_COLUMNS + import_service.TECHNICAL_COLUMNS},
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return import_detail(batch_id, request, error=str(exc), db=db, status_code=400)
+    return redirect_to(f"/imports/{batch.id}?edit_row_id={row_id}")
+
+
+def _review_template(
+    request: Request,
+    db: Session,
+    change_set: ChangeSet,
+    error: str = "",
+    notice: str = "",
+    status_code: int = 200,
+):
+    return render(
+        request,
+        "review_detail.html",
+        db,
+        status_code=status_code,
+        change_set=change_set,
+        related_change_sets=(db.scalars(select(ChangeSet).where(ChangeSet.import_batch_id == change_set.import_batch_id, ChangeSet.id != change_set.id).order_by(ChangeSet.domain)).all() if change_set.import_batch_id else []),
+        previews=[review_service.preview_change_item(db, item) for item in change_set.items],
+        error=error,
+        notice=notice,
+        is_self_submission=_is_self_submission(request, change_set),
+        can_review=change_set.status == "submitted"
+        and auth.has_permission(db, request, "review", change_set.domain)
+        and (not _is_self_submission(request, change_set) or auth.is_system_admin(db, request)),
+        can_apply=change_set.status == "approved"
+        and auth.has_permission(db, request, "apply", change_set.domain),
+)
+
+
+@app.get("/reviews/{change_set_id}")
+def review_detail(change_set_id: int, request: Request, db: Session = Depends(get_db)):
+    change_set = get_or_404(db, ChangeSet, change_set_id)
+    auth.require_permission(db, request, "read", change_set.domain)
+    return _review_template(request, db, change_set)
+
+
+@app.post("/reviews/{change_set_id}/decision")
+async def review_decision(change_set_id: int, request: Request, db: Session = Depends(get_db)):
+    change_set = get_or_404(db, ChangeSet, change_set_id)
+    auth.require_permission(db, request, "review", change_set.domain)
+    form = await request.form()
+    decision = str(form.get("decision", ""))
+    reason = str(form.get("reason", "")).strip()
+    user_id = _user_id(request)
+    if change_set.status != "submitted":
+        return _review_template(request, db, change_set, "该申请当前不可审核。", status_code=400)
+    self_review = _is_self_submission(request, change_set)
+    if self_review and not auth.is_system_admin(db, request):
+        return _review_template(request, db, change_set, "提交人不能审核自己的申请。", status_code=403)
+    if self_review and str(form.get("self_review_confirmed", "")) != "1":
+        return _review_template(request, db, change_set, "自提交、自审核必须勾选二次确认。", status_code=400)
+    if decision not in {"approved", "returned", "rejected"}:
+        return _review_template(request, db, change_set, "无效的审核操作。", status_code=400)
+    if decision == "returned" and not reason:
+        return _review_template(request, db, change_set, "退回时必须填写原因。", status_code=400)
+    change_set.status = decision
+    change_set.reviewed_by_user_id = user_id
+    change_set.reviewed_at = utcnow()
+    if reason:
+        change_set.reason = reason
+    for item in change_set.items:
+        payload = json.loads(item.patch_json)
+        batch_id = payload.get("batch_id")
+        batch = db.get(ImportBatch, batch_id) if batch_id else None
+        if batch is not None:
+            batch.reviewed_by_user_id = user_id
+            batch.status = "rejected" if decision == "rejected" else "ready" if decision == "returned" else "reviewing"
+    ledger_service.log_action(
+        db, f"review_{decision}", user_id, "change_set", change_set.id,
+        json.dumps({"reason": reason, "self_review": self_review}, ensure_ascii=False), _client_ip(request)
+    )
+    db.commit()
+    return redirect_to(f"/reviews/{change_set.id}")
+
+
+@app.post("/reviews/{change_set_id}/apply")
+def review_apply(change_set_id: int, request: Request, db: Session = Depends(get_db)):
+    change_set = get_or_404(db, ChangeSet, change_set_id)
+    auth.require_permission(db, request, "apply", change_set.domain)
+    try:
+        applied = review_service.apply_change_set(db, change_set, _user_id(request))
+        ledger_service.log_action(
+            db, "apply_change_set", _user_id(request), "change_set", change_set.id,
+            json.dumps({"items": applied}, ensure_ascii=False), _client_ip(request)
+        )
+        db.commit()
+    except review_service.ChangeApplicationError as exc:
+        db.rollback()
+        change_set = get_or_404(db, ChangeSet, change_set_id)
+        return _review_template(request, db, change_set, str(exc), status_code=409)
+    return redirect_to(f"/reviews/{change_set.id}")
+
+
+def build_ledger_export_workbook(db: Session):
+    """Build one Chinese data sheet plus a human-readable instruction sheet."""
+
+    from openpyxl import Workbook
+    from openpyxl.comments import Comment
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    workbook = Workbook()
+    ledger_sheet = workbook.active
+    ledger_sheet.title = "业务设备台账"
+    ledger_sheet.append(["业务信息"] + [None] * 14 + ["设备信息"] + [None] * 7 + ["系统校验字段（请勿修改）"] + [None] * 3)
+    ledger_sheet.append(import_service.LEDGER_COLUMNS + import_service.TECHNICAL_COLUMNS)
+    services = db.scalars(select(BusinessService).where(BusinessService.is_active.is_(True)).order_by(BusinessService.service_number)).all()
+    for service in services:
+        devices = [device for device in service.devices if device.is_active] or [None]
+        for device in devices:
+            ledger_sheet.append([
+                service.service_number, service.customer.name, service.county_item.label if service.county_item else "", service.grid_item.label if service.grid_item else "",
+                service.service_status_item.label if service.service_status_item else "", format_date(service.accessed_at), format_date(service.agreement_expires_at), service.business_type_item.label if service.business_type_item else "", service.channel_name,
+                "", "", "", "", "", "",
+                device.asset_class_item.label if device and device.asset_class_item else "", device.device_code if device else "", device.asset_value if device else "", device.device_type_item.label if device and device.device_type_item else "", device.vendor_model if device else "", device.location if device else "", device.recovery_status_item.label if device and device.recovery_status_item else "", device.recovery_reason_item.label if device and device.recovery_reason_item else "",
+                service.id, service.version, device.id if device else "", device.version if device else "",
+            ])
+    ledger_sheet.freeze_panes = "A3"
+    ledger_sheet.auto_filter.ref = f"A2:{ledger_sheet.cell(2, len(import_service.LEDGER_COLUMNS + import_service.TECHNICAL_COLUMNS)).column_letter}{ledger_sheet.max_row}"
+    guidance = {field: (requirement, example) for field, requirement, example in import_service.LEDGER_FIELD_GUIDANCE}
+    for cell in ledger_sheet[2]:
+        if cell.value in guidance:
+            requirement, example = guidance[cell.value]
+            cell.comment = Comment(f"{requirement}\n示例：{example}", "中国联通 IT 运维系统")
+    for cell in ledger_sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="3F4A46")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    for cell in ledger_sheet[2]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="E8ECE9")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    technical_start = len(import_service.LEDGER_COLUMNS) + 1
+    for row in ledger_sheet.iter_rows(min_row=2, min_col=technical_start, max_col=ledger_sheet.max_column):
+        for cell in row:
+            cell.fill = PatternFill("solid", fgColor="F1F3F2")
+
+    validation_options = {
+        "E": ["正常开机", "主动退网(申请拆机)"],
+        "H": ["数据及网元业务", "宽带业务"],
+        "P": ["资产类", "成本类"],
+        "V": ["已回收", "未回收"],
+        "W": ["在用", "遗失", "纠纷", "其他"],
+    }
+    for column_letter, options in validation_options.items():
+        validation = DataValidation(
+            type="list",
+            formula1=f'"{",".join(options)}"',
+            allow_blank=True,
+            errorTitle="填写值不符合要求",
+            error="请从下拉列表中选择允许值。",
+            promptTitle="字段填写要求",
+            prompt="请使用下拉列表中的标准值。",
+        )
+        validation.errorStyle = "stop"
+        validation.showErrorMessage = True
+        validation.showInputMessage = True
+        ledger_sheet.add_data_validation(validation)
+        validation.add(f"{column_letter}3:{column_letter}10000")
+
+    instruction_sheet = workbook.create_sheet("填写说明")
+    instruction_sheet.merge_cells("A1:C1")
+    instruction_sheet["A1"] = "业务设备台账填写说明"
+    instruction_sheet["A1"].font = Font(bold=True, size=16, color="FFFFFF")
+    instruction_sheet["A1"].fill = PatternFill("solid", fgColor="3F4A46")
+    instruction_sheet["A1"].alignment = Alignment(horizontal="center")
+    instruction_sheet.append(["字段", "填写要求", "示例"])
+    for field, requirement, example in import_service.LEDGER_FIELD_GUIDANCE:
+        instruction_sheet.append([field, requirement, example])
+    instruction_sheet.freeze_panes = "A3"
+    instruction_sheet.column_dimensions["A"].width = 28
+    instruction_sheet.column_dimensions["B"].width = 88
+    instruction_sheet.column_dimensions["C"].width = 28
+    for cell in instruction_sheet[2]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="E8ECE9")
+    for row in instruction_sheet.iter_rows(min_row=3):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    for column in ledger_sheet.columns:
+        ledger_sheet.column_dimensions[column[0].column_letter].width = min(max(len(str(cell.value or "")) for cell in column) + 2, 28)
+    return workbook
+
+
+@app.get("/exports/ledger.xlsx")
+def export_ledger(request: Request, db: Session = Depends(get_db)):
+    auth.require_permission(db, request, "export", "system")
+    workbook = build_ledger_export_workbook(db)
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    ledger_service.log_action(
+        db, "export", _user_id(request), "business_ledger", detail=json.dumps({"format": "flat_zh_xlsx"}, ensure_ascii=False), ip_address=_client_ip(request)
+    )
+    db.commit()
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=unicom-it-ledger-export.xlsx"},
     )
 
 
@@ -1102,11 +1545,109 @@ def admin_roles_page(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.get("/admin/dictionaries")
-def admin_dictionaries_page(request: Request, db: Session = Depends(get_db)):
+# ---------------------------------------------------------------- 系统监控
+
+
+SYSTEM_TABS = {"status", "logs", "settings"}
+
+# 监控页展示的 .env 配置（密钥类配置一律不展示）。
+ENV_SETTINGS = [
+    ("MODEM_PORT", lambda s: s.modem_port, "A7670E 串口设备路径"),
+    ("MODEM_BAUD", lambda s: s.modem_baud, "串口波特率"),
+    ("AUDIO_DEVICE", lambda s: s.audio_device, "aplay 播放设备（ALSA）"),
+    ("CALL_CONNECT_TIMEOUT_SECONDS", lambda s: s.call_connect_timeout_seconds, "接通等待超时兜底（秒）"),
+    ("MIN_CONNECTED_SECONDS", lambda s: s.min_connected_seconds, "接通后有效时长阈值（秒）"),
+    ("RETRY_DELAY_SECONDS", lambda s: s.retry_delay_seconds, "自动重试延迟（秒）"),
+    ("MAX_CALL_ATTEMPTS", lambda s: s.max_call_attempts, "最大尝试次数（含首次）"),
+    ("TTS_PROVIDER", lambda s: s.tts_provider, "TTS 提供商（none 表示离线）"),
+    ("DEFAULT_TIMEZONE", lambda s: s.default_timezone, "计划默认时区"),
+    ("CALL_WORKER_ENABLED", lambda s: "是" if s.call_worker_enabled else "否", "外呼 Worker 自动启动硬开关"),
+    ("WORKER_POLL_SECONDS", lambda s: s.worker_poll_seconds, "Worker 空闲轮询间隔（秒）"),
+]
+
+
+def _day_start_utc() -> datetime:
+    zone = plan_service.get_zone(settings.default_timezone)
+    today = datetime.now(zone).date()
+    return datetime.combine(today, time.min, tzinfo=zone).astimezone(timezone.utc)
+
+
+def _schema_status(db: Session) -> dict:
+    current = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    head = get_schema_head()
+    return {"current": current or "", "head": head, "ok": current == head}
+
+
+@app.get("/admin/system")
+def admin_system_page(
+    request: Request,
+    tab: str = "status",
+    event_type: str = "",
+    db: Session = Depends(get_db),
+):
     auth.require_login(request)
-    categories = categories_with_items(db)
-    return render(request, "admin_dictionaries.html", db, categories=categories)
+    tab = tab if tab in SYSTEM_TABS else "status"
+
+    if tab == "status":
+        scripts = db.scalars(select(Script)).all()
+        scripts_with_wav = sum(1 for s in scripts if s.wav_path and Path(s.wav_path).exists())
+        queue_counts = {
+            name: db.scalar(select(func.count(CallTask.id)).where(CallTask.status == name)) or 0
+            for name in ["queued", "dialing"]
+        }
+        today_records = db.scalar(
+            select(func.count(CallRecord.id)).where(CallRecord.created_at >= _day_start_utc())
+        ) or 0
+        return render(
+            request,
+            "admin_system.html",
+            db,
+            tab=tab,
+            scheduler_status=scheduler_service.status(),
+            scheduler_enabled=is_scheduler_enabled(db),
+            worker_status=call_worker_service.status(),
+            worker_enabled=is_worker_enabled(db),
+            worker_gate=settings.call_worker_enabled,
+            queue_counts=queue_counts,
+            scripts_total=len(scripts),
+            scripts_with_wav=scripts_with_wav,
+            today_records=today_records,
+            schema=_schema_status(db),
+        )
+
+    if tab == "logs":
+        event_types = db.scalars(
+            select(CallEvent.event_type).distinct().order_by(CallEvent.event_type)
+        ).all()
+        events_query = select(CallEvent).order_by(CallEvent.created_at.desc())
+        if event_type:
+            events_query = events_query.where(CallEvent.event_type == event_type)
+        recent_events = db.scalars(events_query.limit(100)).all()
+        recent_audit = db.scalars(
+            select(AuditLog).order_by(AuditLog.created_at.desc()).limit(50)
+        ).all()
+        return render(
+            request,
+            "admin_system.html",
+            db,
+            tab=tab,
+            event_types=event_types,
+            event_type_filter=event_type,
+            recent_events=recent_events,
+            recent_audit=recent_audit,
+        )
+
+    return render(
+        request,
+        "admin_system.html",
+        db,
+        tab=tab,
+        env_settings=[(key, getter(settings), desc) for key, getter, desc in ENV_SETTINGS],
+        runtime_settings=[
+            ("scheduler_enabled", "1" if is_scheduler_enabled(db) else "0", "定时调度器开关"),
+            (CALL_WORKER_ENABLED_KEY, "1" if is_worker_enabled(db) else "0", "外呼 Call Worker 开关"),
+        ],
+    )
 
 
 # ---------------------------------------------------------------- 话术
@@ -1218,6 +1759,7 @@ def plans_template(
     plans = db.scalars(select(CallbackPlan).order_by(CallbackPlan.created_at.desc())).all()
     customers = db.scalars(select(Customer).order_by(Customer.name.asc())).all()
     scripts = db.scalars(select(Script).order_by(Script.title.asc())).all()
+    contacts = db.scalars(select(Contact).where(Contact.is_active.is_(True)).order_by(Contact.name.asc(), Contact.id.asc())).all()
     return render(
         request,
         "plans.html",
@@ -1226,22 +1768,25 @@ def plans_template(
         plans=plans,
         customers=customers,
         scripts=scripts,
-        customer_phones=customer_phone_map(db, customers),
+        contacts=contacts,
         edit_plan=edit_plan,
         form_data=form_data or {},
         error=error,
     )
 
 
-def _parse_plan_form(db: Session, form) -> tuple[Customer, Script, str, datetime | None, str, str, bool]:
+def _parse_plan_form(db: Session, form) -> tuple[Customer, Script, Contact, str, datetime | None, str, str, bool]:
     customer = get_or_404(db, Customer, int(form.get("customer_id", 0)))
     script = get_or_404(db, Script, int(form.get("script_id", 0)))
+    contact = get_or_404(db, Contact, int(form.get("contact_id", 0)))
+    if not contact.is_active or not contact.phone:
+        raise ValueError("请选择一位有有效联系电话的通讯录人员。")
     trigger_type = str(form.get("trigger_type", "once")).strip()
     timezone_name = str(form.get("timezone", settings.default_timezone)).strip() or settings.default_timezone
     run_at = plan_service.parse_datetime_local(str(form.get("run_at", "")), timezone_name)
     cron_expr = str(form.get("cron_expr", "")).strip()
     enabled = str(form.get("enabled", "")) == "on"
-    return customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled
+    return customer, script, contact, trigger_type, run_at, cron_expr, timezone_name, enabled
 
 
 @app.get("/plans")
@@ -1260,8 +1805,8 @@ async def plan_create(request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
     form = await request.form()
     try:
-        customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled = _parse_plan_form(db, form)
-        plan_service.create_plan(db, customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled)
+        customer, script, contact, trigger_type, run_at, cron_expr, timezone_name, enabled = _parse_plan_form(db, form)
+        plan_service.create_plan(db, customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled, contact)
     except (ValueError, HTTPException) as exc:
         if isinstance(exc, HTTPException):
             raise
@@ -1276,8 +1821,8 @@ async def plan_update(plan_id: int, request: Request, db: Session = Depends(get_
     plan = get_or_404(db, CallbackPlan, plan_id)
     form = await request.form()
     try:
-        customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled = _parse_plan_form(db, form)
-        plan_service.update_plan(plan, customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled)
+        customer, script, contact, trigger_type, run_at, cron_expr, timezone_name, enabled = _parse_plan_form(db, form)
+        plan_service.update_plan(plan, customer, script, trigger_type, run_at, cron_expr, timezone_name, enabled, contact)
     except ValueError as exc:
         return plans_template(request, db, str(exc), dict(form), edit_plan=plan, status_code=400)
     db.commit()

@@ -1,6 +1,7 @@
-# Callback Demo
+# 中国联通 IT 运维客户信息管理系统
 
-FastAPI skeleton for the Rock Pi 3A operator network ledger and callback demo.
+运行在 Rock Pi 3A 上的中国联通内网 IT 运维客户信息管理系统，包含业务台账、
+网络设备、导入审核与电话回访 Demo。
 The original callback details remain in `docs/callback-demo-plan.md`; the
 expanded product baselines are in:
 

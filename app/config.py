@@ -33,8 +33,6 @@ def _env_int(name: str, default: int) -> int:
 
 @dataclass(frozen=True)
 class Settings:
-    app_host: str
-    app_port: int
     admin_password: str
     session_secret: str
     database_url: str
@@ -42,6 +40,7 @@ class Settings:
     modem_baud: int
     audio_device: str
     call_connect_timeout_seconds: int
+    rejected_end_seconds: int
     min_connected_seconds: int
     retry_delay_seconds: int
     max_call_attempts: int
@@ -49,6 +48,9 @@ class Settings:
     tts_api_key: str
     tts_voice: str
     default_timezone: str
+    # 外呼 Worker 自动启动硬开关：默认关闭，防止开发/测试时误拨电话。
+    call_worker_enabled: bool
+    worker_poll_seconds: int
 
     @property
     def cookie_secret(self) -> str:
@@ -58,8 +60,6 @@ class Settings:
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
-        app_host=_env("APP_HOST", "0.0.0.0"),
-        app_port=_env_int("APP_PORT", 8000),
         admin_password=_env("ADMIN_PASSWORD"),
         session_secret=_env("SESSION_SECRET"),
         database_url=_env("DATABASE_URL", "sqlite:///./data/app.db"),
@@ -67,6 +67,8 @@ def get_settings() -> Settings:
         modem_baud=_env_int("MODEM_BAUD", 115200),
         audio_device=_env("AUDIO_DEVICE", "plughw:1,0"),
         call_connect_timeout_seconds=_env_int("CALL_CONNECT_TIMEOUT_SECONDS", 90),
+        # 响铃后未接通释放的拒接阈值：小于该时长视为主动拒接，不自动重试。
+        rejected_end_seconds=_env_int("REJECTED_END_SECONDS", 20),
         min_connected_seconds=_env_int("MIN_CONNECTED_SECONDS", 8),
         retry_delay_seconds=_env_int("RETRY_DELAY_SECONDS", 300),
         max_call_attempts=_env_int("MAX_CALL_ATTEMPTS", 2),
@@ -74,6 +76,9 @@ def get_settings() -> Settings:
         tts_api_key=_env("TTS_API_KEY"),
         tts_voice=_env("TTS_VOICE"),
         default_timezone=_env("DEFAULT_TIMEZONE", "Asia/Shanghai"),
+        call_worker_enabled=_env("CALL_WORKER_ENABLED", "0").lower()
+        in {"1", "true", "yes", "on"},
+        worker_poll_seconds=_env_int("WORKER_POLL_SECONDS", 5),
     )
 
 

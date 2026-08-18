@@ -11,10 +11,10 @@
         <dt>客户</dt><dd>{{ record.customer.name }}</dd>
         <dt>拨号号码</dt><dd class="mono">{{ record.dial_number or "-" }}</dd>
         <dt>话术</dt><dd>{{ record.script.title }}</dd>
-        <dt>状态</dt><dd><span class="status-pill {{ record.status }}">{{ record.status }}</span></dd>
-        <dt>开始拨号</dt><dd>{{ record.dialing_started_at|dt }}</dd>
-        <dt>接通</dt><dd>{{ record.connected_at|dt }}</dd>
-        <dt>结束</dt><dd>{{ record.ended_at|dt }}</dd>
+        <dt>状态</dt><dd><span class="status-pill {{ record.status }}">{{ record.status|status_label }}</span></dd>
+        <dt>开始拨号</dt><dd>{{ record.dialing_started_at|dt_s }}</dd>
+        <dt>接通</dt><dd>{{ record.connected_at|dt_s }}</dd>
+        <dt>结束</dt><dd>{{ record.ended_at|dt_s }}</dd>
         <dt>时长（秒）</dt><dd>{{ record.duration_seconds or "-" }}</dd>
         <dt>错误</dt><dd>{{ record.error_message or "-" }}</dd>
       </dl>
@@ -42,6 +42,7 @@
     <div class="panel-head">
       <h2>事件时间线</h2>
     </div>
+    <div class="table-wrap">
     <table>
       <thead>
         <tr>
@@ -54,7 +55,7 @@
       <tbody>
         {% for event in events %}
           <tr>
-            <td>{{ event.created_at|dt }}</td>
+            <td>{{ event.created_at|dt_s }}</td>
             <td><span class="status-pill muted">{{ event.event_type }}</span></td>
             <td>{{ event.message or "-" }}</td>
             <td class="mono">{{ event.raw_line or "-" }}</td>
@@ -64,5 +65,6 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
 {% endblock %}
