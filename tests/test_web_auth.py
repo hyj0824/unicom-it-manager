@@ -249,7 +249,7 @@ def test_plan_form_validation(client: TestClient, webdb) -> None:
     # once 计划缺少 run_at → 400。
     resp = client.post("/plans", data={**base, "run_at": ""})
     assert resp.status_code == 400
-    assert "run_at is required" in resp.text
+    assert "必须填写执行时间" in resp.text
 
     # 无效 trigger_type → 400。
     resp = client.post(
