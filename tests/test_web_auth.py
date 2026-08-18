@@ -229,9 +229,10 @@ def test_plan_form_validation(client: TestClient, webdb) -> None:
         "timezone": "Asia/Shanghai",
     }
 
-    # 未选择联系人（id 不存在）→ 404。
+    # 未选择联系人（占位值 0 视为未选择）→ 400，提示选择负责人。
     resp = client.post("/plans", data={**base, "contact_id": "0", "run_at": "2026-01-15T10:30"})
-    assert resp.status_code == 404
+    assert resp.status_code == 400
+    assert "请选择拨打负责人" in resp.text
 
     # 联系人的联系电话为空 → 400。
     with webdb() as db:
