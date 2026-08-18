@@ -44,7 +44,7 @@ def test_once_naive_run_at_treated_as_utc():
 
 
 def test_once_requires_run_at():
-    with pytest.raises(ValueError, match="run_at is required"):
+    with pytest.raises(ValueError, match="必须填写执行时间"):
         compute_next_run_at("once", None, "", "Asia/Shanghai")
 
 
@@ -78,7 +78,7 @@ def test_cron_from_time_after_fire_advances_to_next_day():
 
 
 def test_cron_requires_expression():
-    with pytest.raises(ValueError, match="cron_expr"):
+    with pytest.raises(ValueError, match="必须填写 Cron 表达式"):
         compute_next_run_at("cron", None, "   ", "Asia/Shanghai")
 
 
