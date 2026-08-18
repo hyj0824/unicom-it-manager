@@ -27,7 +27,7 @@
             <a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>
             <a class="{% if path.startswith('/imports') or path.startswith('/exports') %}active{% endif %}" href="/imports">导入导出</a>
           </details>
-          <details class="nav-section" {% if path.startswith('/contacts') or path.startswith('/plans') or path.startswith('/scripts') or path.startswith('/calls') %}open{% endif %}>
+          <details class="nav-section" {% if path.startswith('/customers') or path.startswith('/contacts') or path.startswith('/plans') or path.startswith('/scripts') or path.startswith('/calls') %}open{% endif %}>
             <summary>回访与通话</summary>
             <a class="{% if path.startswith('/customers') or path.startswith('/contacts') %}active{% endif %}" href="/customers">通讯录</a>
             <a class="{% if path.startswith('/plans') %}active{% endif %}" href="/plans">回访计划</a>

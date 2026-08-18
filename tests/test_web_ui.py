@@ -742,3 +742,31 @@ def test_modem_availability_levels() -> None:
     assert modem_availability(settings2, {"last_error": "boom"})["level"] == "fail"
     assert modem_availability(settings2, {"running": True})["level"] == "ok"
     assert modem_availability(settings2, {})["level"] == "warn"
+
+
+def test_nav_section_open_on_customers_page(client: TestClient) -> None:
+    """回归：进入 /customers 时「回访与通话」导航组必须展开。
+
+    链接 active 判断含 /customers，但 <details> open 条件曾漏掉它，
+    导致进入客户页时整组导航收起。
+    """
+    login(client)
+    for page, expected_open in [
+        ("/customers", True),
+        ("/contacts", True),
+        ("/plans", True),
+        ("/scripts", True),
+        ("/calls", True),
+        ("/ledger", False),
+        ("/", False),
+    ]:
+        html = client.get(page).text
+        marker = '<details class="nav-section"'
+        summary = "<summary>回访与通话"
+        summary_idx = html.find(summary)
+        assert summary_idx != -1, page
+        # 定位该 summary 所属的 details 开始标签（向前找最近的）。
+        start = html.rfind(marker, 0, summary_idx)
+        assert start != -1, page
+        seg = html[start:summary_idx]
+        assert ("open" in seg) is expected_open, page
