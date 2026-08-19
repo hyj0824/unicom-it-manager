@@ -56,6 +56,7 @@ from .services import imports as import_service
 from .services import ledger as ledger_service
 from .services import reviews as review_service
 from .services import change_requests as change_request_service
+from .services import dashboard as dashboard_service
 from .services import plans as plan_service
 from .services.call_worker import call_worker_service, modem_availability
 from .services.backups import backup_service
@@ -474,76 +475,7 @@ async def password_change_submit(request: Request, db: Session = Depends(get_db)
 @app.get("/")
 def dashboard(request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
-    now = utcnow()
-    expiring_soon = now + timedelta(days=30)
-
-    active_task = db.scalars(
-        select(CallTask)
-        .where(CallTask.status.in_(["queued", "dialing", "connected"]))
-        .order_by(CallTask.due_at.asc(), CallTask.created_at.asc())
-        .limit(1)
-    ).first()
-    pending_reviews = db.scalar(
-        select(func.count(ChangeSet.id)).where(ChangeSet.status == "submitted")
-    ) or 0
-    missing_total = sum(row["count"] for row in ledger_service.business_missing_fields(db))  # type: ignore[arg-type]
-    missing_total += sum(row["count"] for row in ledger_service.device_missing_fields(db))  # type: ignore[arg-type]
-    expiring_services = db.scalar(
-        select(func.count(BusinessService.id)).where(
-            BusinessService.is_active.is_(True),
-            BusinessService.agreement_expires_at.is_not(None),
-            BusinessService.agreement_expires_at <= expiring_soon,
-        )
-    ) or 0
-
-    call_stats = {
-        name: db.scalar(select(func.count(CallRecord.id)).where(CallRecord.status == name)) or 0
-        for name in ["completed", "failed", "short_call", "no_answer"]
-    }
-    counts = {
-        "services": db.scalar(
-            select(func.count(BusinessService.id)).where(BusinessService.is_active.is_(True))
-        ) or 0,
-        "devices": db.scalar(
-            select(func.count(NetworkDevice.id)).where(NetworkDevice.is_active.is_(True))
-        ) or 0,
-        "customers": db.scalar(select(func.count(Customer.id))) or 0,
-        "scan_schedules": db.scalar(select(func.count(ScanSchedule.id))) or 0,
-        "records": db.scalar(select(func.count(CallRecord.id))) or 0,
-    }
-    scan_enabled = db.scalar(
-        select(func.count(ScanSchedule.id)).where(ScanSchedule.enabled.is_(True))
-    ) or 0
-    recent_records = db.scalars(
-        select(CallRecord).order_by(CallRecord.created_at.desc()).limit(8)
-    ).all()
-    recent_batches = db.scalars(
-        select(ImportBatch)
-        .where(ImportBatch.error_count > 0)
-        .order_by(ImportBatch.created_at.desc())
-        .limit(5)
-    ).all()
-    # 仪表盘 Worker 状态：硬开关（.env）、运行时开关、进程状态、当前通话，
-    # 以及串口可用性的只读判断（不打开串口、不发送 AT 指令）。
-    worker_status = call_worker_service.status()
-    return render(
-        request,
-        "dashboard.html",
-        db,
-        active_task=active_task,
-        pending_reviews=pending_reviews,
-        missing_total=missing_total,
-        expiring_services=expiring_services,
-        scan_enabled=scan_enabled,
-        call_stats=call_stats,
-        counts=counts,
-        recent_records=recent_records,
-        recent_batches=recent_batches,
-        worker_status=worker_status,
-        worker_gate=settings.call_worker_enabled,
-        worker_enabled=is_worker_enabled(db),
-        modem_status=modem_availability(settings, worker_status),
-    )
+    return render(request, "dashboard.html", db, **dashboard_service.dashboard_data(db, request))
 
 
 @app.post("/settings/scheduler")

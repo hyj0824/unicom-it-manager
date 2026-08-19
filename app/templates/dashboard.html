@@ -1,160 +1,134 @@
 {% extends "base.html" %}
-{% block page_title %}工作台{% endblock %}
+{% block page_title %}我的任务看板{% endblock %}
 {% block content %}
-  <div class="metrics">
-    <div class="metric">
-      <span>待审核变更</span>
-      <strong>{{ pending_reviews }}</strong>
-    </div>
-    <div class="metric">
-      <span>缺项条目</span>
-      <strong>{{ missing_total }}</strong>
-    </div>
-    <div class="metric">
-      <span>启用的扫描配置</span>
-      <strong>{{ scan_enabled }}</strong>
-    </div>
-    <div class="metric">
-      <span>30 天内到期业务</span>
-      <strong>{{ expiring_services }}</strong>
-    </div>
-  </div>
+<style>
+  .dashboard-grid { display: grid; gap: 18px; }
+  .todo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .todo-card { min-height: 112px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  .todo-card .label { color: var(--muted); font-size: 12px; font-weight: 700; }
+  .todo-card strong { display: block; margin-top: 12px; color: var(--primary-strong); font-size: 30px; line-height: 1; }
+  .todo-card a { display: block; margin-top: 10px; color: var(--primary); font-size: 12px; }
+  .board-columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr); gap: 18px; align-items: start; }
+  .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .chart-panel { min-width: 0; }
+  .chart-panel h3 { margin: 0 0 14px; font-size: 15px; }
+  .bar-row { display: grid; grid-template-columns: minmax(84px, 1fr) 2fr 42px; gap: 9px; align-items: center; margin: 10px 0; font-size: 12px; }
+  .bar-track { height: 9px; overflow: hidden; border-radius: 999px; background: #e8ece8; }
+  .bar-fill { height: 100%; min-width: 2px; border-radius: inherit; background: var(--primary); }
+  .bar-fill.alt { background: var(--warning); }
+  .bar-fill.ok { background: var(--ok); }
+  .trend-chart { width: 100%; height: 150px; }
+  .trend-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; align-items: end; height: 150px; }
+  .trend-col { display: grid; grid-template-rows: 1fr auto; gap: 6px; height: 100%; text-align: center; color: var(--muted); font-size: 10px; }
+  .trend-bar-wrap { display: flex; align-items: end; justify-content: center; height: 100%; }
+  .trend-bar { width: min(28px, 70%); min-height: 3px; border-radius: 4px 4px 0 0; background: var(--primary); }
+  .donut-wrap { display: flex; gap: 18px; align-items: center; }
+  .donut { width: 132px; height: 132px; flex: 0 0 auto; }
+  .legend { display: grid; gap: 7px; min-width: 0; }
+  .legend-row { display: grid; grid-template-columns: 10px 1fr auto; gap: 7px; align-items: center; font-size: 12px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--primary); }
+  .legend-dot:nth-child(2n) { background: var(--warning); }
+  .legend-dot:nth-child(3n) { background: var(--ok); }
+  .notification-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .notification-list li { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); align-items: center; font-size: 12px; }
+  .notification-list li:last-child { border-bottom: 0; }
+  .notification-list time { color: var(--muted); }
+  .empty-state { color: var(--muted); }
+  @media (max-width: 900px) { .board-columns, .chart-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 620px) { .todo-grid { grid-template-columns: 1fr; } .notification-list li { grid-template-columns: 1fr auto; } .notification-list time { grid-column: 1 / -1; } .donut-wrap { align-items: flex-start; flex-direction: column; } }
+</style>
 
-  <section class="panel">
-    <div class="panel-head"><h2>当前拨号状态</h2></div>
-    <div class="summary-grid">
-      <div>
-        <span>当前任务</span>
-        <strong>
-          {% if active_task %}
-            <span class="status-pill {{ active_task.status }}">{{ active_task.status|status_label }}</span>
-            {{ active_task.dial_number or "无号码" }}
-          {% else %}
-            空闲
-          {% endif %}
-        </strong>
-      </div>
-      <div>
-        <span>通话统计</span>
-        <strong>
-          完成 {{ call_stats.completed }} · 短通话 {{ call_stats.short_call }} ·
-          未接通 {{ call_stats.no_answer }} · 失败 {{ call_stats.failed }}
-        </strong>
-      </div>
-    </div>
-  </section>
-
+<div class="dashboard-grid">
   <section class="panel">
     <div class="panel-head">
-      <h2>外呼 Worker</h2>
-      <span class="status-pill {{ 'ok' if worker_status.running else 'muted' }}">
-        {{ '运行中' if worker_status.running else ('已暂停' if worker_enabled else '未启用') }}
-      </span>
+      <div>
+        <h2>我的待办</h2>
+        <span class="subtle">{% if global_scope %}管理员视角：全局数据{% else %}按当前登录账号的职责与手机号匹配{% endif %}</span>
+      </div>
+      <a class="button secondary small" href="/reviews">审核中心</a>
     </div>
-    {% if not worker_gate %}
-      <div class="alert warning">
-        <strong>CALL_WORKER_ENABLED</strong> 未在 <code>.env</code> 中开启（硬开关关闭），
-        Worker 进程不会启动，也不会拨号；确认硬件链路后在 <code>.env</code> 开启并重启服务。
+    <div class="todo-grid">
+      <div class="todo-card">
+        <span class="label">待审核申请</span>
+        <strong>{{ pending_reviews }}</strong>
+        {% if review_domains %}<a href="/reviews">{{ '全局' if global_scope else '可审核域：' ~ review_domains|join('、') }}</a>{% endif %}
       </div>
-    {% endif %}
-    <div class="summary-grid">
-      <div>
-        <span>.env 硬开关</span>
-        <strong>{{ '已开启' if worker_gate else '关闭' }}</strong>
-      </div>
-      <div>
-        <span>运行时开关</span>
-        <strong>{{ '启用' if worker_enabled else '停用' }}</strong>
-      </div>
-      <div>
-        <span>串口可用性</span>
-        <strong>
-          <span class="status-pill {{ modem_status.level }}">{{ '正常' if modem_status.level == 'ok' else ('待验证' if modem_status.level == 'warn' else '不可用') }}</span>
-          <span class="subtle">{{ modem_status.reason }}</span>
-        </strong>
-      </div>
-      <div>
-        <span>当前通话</span>
-        <strong>
-          {% if worker_status.working %}
-            <span class="status-pill connected">拨号中</span>
-            #{{ worker_status.task_id or '-' }} {{ worker_status.current_number or '' }}
-          {% else %}
-            空闲
-          {% endif %}
-        </strong>
-      </div>
-      <div>
-        <span>已处理任务</span>
-        <strong>{{ worker_status.processed }}</strong>
-      </div>
-      <div>
-        <span>最近结果</span>
-        <strong>{{ worker_status.last_result|status_label if worker_status.last_result else '-' }}</strong>
-      </div>
+      {% if show_my_due_cards %}
+        <div class="todo-card">
+          <span class="label">我的到期业务</span>
+          <strong>{{ my_due_services }}</strong>
+          <a href="/due-work">查看维系工作</a>
+        </div>
+        <div class="todo-card">
+          <span class="label">我的待回收设备</span>
+          <strong>{{ my_due_devices }}</strong>
+          <a href="/due-work">查看回收工作</a>
+        </div>
+      {% endif %}
     </div>
   </section>
 
-  <div class="metrics">
-    <div class="metric"><span>有效业务</span><strong>{{ counts.services }}</strong></div>
-    <div class="metric"><span>有效设备</span><strong>{{ counts.devices }}</strong></div>
-    <div class="metric"><span>客户</span><strong>{{ counts.customers }}</strong></div>
-    <div class="metric"><span>扫描配置</span><strong>{{ counts.scan_schedules }}</strong></div>
-  </div>
-
-  <section class="panel">
-    <div class="panel-head">
-      <h2>最近通话</h2>
-      <a class="button secondary small" href="/calls">全部通话</a>
-    </div>
-    <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>时间</th><th>客户主体</th><th>拨打负责人</th><th>电话</th><th>话术</th><th>状态</th><th>时长</th></tr>
-      </thead>
-      <tbody>
-        {% for record in recent_records %}
-          <tr>
-            <td>{{ record.created_at|dt }}</td>
-            <td>{{ record.customer.name }}</td>
-            <td>{{ record.contact.name if record.contact else "-" }}</td>
-            <td class="mono">{{ record.dial_number or "-" }}</td>
-            <td>{{ record.script.title }}</td>
-            <td><span class="status-pill {{ record.status }}">{{ record.status|status_label }}</span></td>
-            <td>{{ record.duration_seconds or "-" }}</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="7" class="empty">暂无通话记录。</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  </section>
-
-  {% if recent_batches %}
+  <div class="board-columns">
     <section class="panel">
-      <div class="panel-head">
-        <h2>最近异常导入批次</h2>
-        <a class="button secondary small" href="/imports">导入导出</a>
-      </div>
-      <div class="table-wrap">
-      <table>
-        <thead>
-          <tr><th>文件</th><th>导入时间</th><th>总行数</th><th>错误</th><th>缺项</th></tr>
-        </thead>
-        <tbody>
-          {% for batch in recent_batches %}
-            <tr>
-              <td>{{ batch.file_name }}</td>
-              <td>{{ batch.created_at|dt }}</td>
-              <td>{{ batch.total_rows }}</td>
-              <td><span class="status-pill error">{{ batch.error_count }}</span></td>
-              <td><span class="status-pill short_call">{{ batch.missing_count }}</span></td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      </div>
+      <div class="panel-head"><h2>我的最近通知</h2><a class="button secondary small" href="/calls">全部通话</a></div>
+      <ul class="notification-list">
+        {% for item in recent_notifications %}
+          <li><time>{{ item.created_at|dt }}</time><span>{{ item.type }}</span><span class="status-pill muted">{{ item.result }}</span></li>
+        {% else %}
+          <li class="empty-state">暂无通知记录。</li>
+        {% endfor %}
+      </ul>
     </section>
-  {% endif %}
+    {% if admin_metrics %}
+      <section class="panel">
+        <div class="panel-head"><h2>运营概览</h2><span class="subtle">管理员</span></div>
+        <div class="summary-grid">
+          <div><span>排队任务</span><strong>{{ admin_metrics.queued_tasks }}</strong></div>
+          <div><span>今日通话</span><strong>{{ admin_metrics.today_calls }}</strong></div>
+        </div>
+      </section>
+    {% endif %}
+  </div>
+
+  <section class="panel">
+    <div class="panel-head"><h2>全局统计</h2><span class="subtle">业务、设备、审核和数据质量</span></div>
+    <div class="metrics">
+      <div class="metric"><span>业务总数</span><strong>{{ counts.services }}</strong></div>
+      <div class="metric"><span>设备总数</span><strong>{{ counts.devices }}</strong></div>
+      <div class="metric"><span>待审核</span><strong>{{ global_pending_reviews }}</strong></div>
+      <div class="metric"><span>缺项总数</span><strong>{{ missing_total }}</strong></div>
+    </div>
+    <div class="chart-grid" style="margin-top:18px">
+      <div class="chart-panel">
+        <h3>业务状态分布</h3>
+        {% for item in business_statuses %}
+          <div class="bar-row"><span>{{ item.label }}</span><div class="bar-track"><div class="bar-fill" style="width:{{ item.percent }}%"></div></div><strong>{{ item.count }}</strong></div>
+        {% else %}<div class="empty-state">暂无业务数据。</div>{% endfor %}
+      </div>
+      <div class="chart-panel">
+        <h3>通话结果分布</h3>
+        <div class="donut-wrap">
+          <svg class="donut" viewBox="0 0 42 42" role="img" aria-label="通话结果分布">
+            <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#e8ece8" stroke-width="6" />
+            {% set ring = namespace(offset=25) %}
+            {% for item in call_results %}
+              <circle cx="21" cy="21" r="15.9155" fill="none" stroke="{{ ['#0f766e', '#b7791f', '#157347', '#b42318', '#6b7280', '#7c3aed', '#2563eb', '#9f1239'][loop.index0 % 8] }}" stroke-width="6" stroke-dasharray="{{ item.percent }} {{ 100 - item.percent }}" stroke-dashoffset="{{ ring.offset }}" transform="rotate(-90 21 21)" />
+              {% set ring.offset = ring.offset - item.percent %}
+            {% endfor %}
+          </svg>
+          <div class="legend">
+            {% for item in call_results %}<div class="legend-row"><i class="legend-dot"></i><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>{% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="chart-panel" style="grid-column:1 / -1">
+        <h3>通知趋势 · 最近 7 天</h3>
+        {% set max_trend = notification_trend|map(attribute='count')|max or 1 %}
+        <div class="trend-grid">
+          {% for item in notification_trend %}<div class="trend-col"><div class="trend-bar-wrap"><div class="trend-bar" style="height:{{ (item.count * 100 / max_trend)|round(1) }}%" title="{{ item.date }}：{{ item.count }} 条"></div></div><span>{{ item.date }}<br>{{ item.count }}</span></div>{% endfor %}
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
 {% endblock %}

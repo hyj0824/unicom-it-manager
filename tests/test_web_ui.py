@@ -7,7 +7,7 @@ from __future__ import annotations
 - 通话详情的时间线（事件正序、原始串口行、错误信息）；
 - 扫描通知配置表单的 cron/时区校验错误与 CRUD（创建/编辑/停用/删除）；
 - 失败任务人工重新入队；
-- 仪表盘 Worker 硬开关 / 串口可用性 / 当前通话状态展示；
+- 仪表盘个性化待办、全局图表与管理员运营指标展示；
 - 高影响操作的 data-confirm 确认提示；
 - 删除被引用话术时的可读错误（含引用数量）。
 
@@ -600,20 +600,26 @@ def test_call_detail_offers_requeue_for_terminal_task(client: TestClient) -> Non
     assert "重新入队" in resp.text
 
 
-# ---------------------------------------------------------------- 仪表盘 Worker 状态
+# ---------------------------------------------------------------- 工作台任务看板
 
 
-def test_dashboard_shows_worker_serial_and_current_call(client: TestClient) -> None:
+def test_dashboard_shows_task_board_and_global_charts(client: TestClient) -> None:
     login(client)
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "外呼 Worker" in resp.text
-    assert ".env 硬开关" in resp.text
-    assert "关闭" in resp.text  # CALL_WORKER_ENABLED=0（conftest）
-    assert "未启用" in resp.text
-    assert "串口可用性" in resp.text
-    assert "当前通话" in resp.text
-    assert "空闲" in resp.text  # worker_status.working = False
+    assert "我的任务看板" in resp.text
+    assert "我的待办" in resp.text
+    assert "我的最近通知" in resp.text
+    assert "业务状态分布" in resp.text
+    assert "通话结果分布" in resp.text
+    assert "通知趋势" in resp.text
+    assert "业务总数" in resp.text
+    assert "缺项总数" in resp.text
+    assert "外呼 Worker" not in resp.text
+    assert "串口可用性" not in resp.text
+    assert ".env 硬开关" not in resp.text
+    assert "排队任务" in resp.text
+    assert "今日通话" in resp.text
 
     system = client.get("/admin/system")
     assert system.status_code == 200
