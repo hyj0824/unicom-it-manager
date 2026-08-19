@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% block page_title %}维系与回收工作台{% endblock %}
+{% block page_title %}{% if page_type == "recycle" %}设备回收登记{% else %}客户维系登记{% endif %}{% endblock %}
 {% block content %}
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
   {% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
 
+  {% if page_type == "renew" %}
   <section class="panel">
     <div class="panel-head">
       <h2>到期维系业务（提前 {{ lead_days }} 天）</h2>
@@ -70,7 +71,7 @@
     </table>
     </div>
   </section>
-
+  {% else %}
   <section class="panel">
     <div class="panel-head">
       <h2>退网未回收设备</h2>
@@ -113,4 +114,5 @@
     </table>
     </div>
   </section>
+  {% endif %}
 {% endblock %}

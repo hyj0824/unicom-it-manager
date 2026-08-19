@@ -17,17 +17,18 @@
         </div>
         <nav class="nav" aria-label="主导航">
           <a class="{% if path == '/' %}active{% endif %}" href="/">工作台</a>
-          <details class="nav-section" {% if path.startswith('/ledger') or path.startswith('/devices') %}open{% endif %}>
-            <summary>数据录入</summary>
+          <details class="nav-section" {% if path.startswith('/ledger') or path.startswith('/devices') or path.startswith('/reviews') or path.startswith('/missing') or path.startswith('/imports') or path.startswith('/exports') %}open{% endif %}>
+            <summary>数据管理</summary>
             <a class="{% if path.startswith('/ledger') %}active{% endif %}" href="/ledger">业务台账</a>
             <a class="{% if path.startswith('/devices') %}active{% endif %}" href="/devices">网络设备</a>
-          </details>
-          <details class="nav-section" {% if path.startswith('/reviews') or path.startswith('/due-work') or path.startswith('/missing') or path.startswith('/imports') or path.startswith('/exports') %}open{% endif %}>
-            <summary>数据管理</summary>
-            <a class="{% if path.startswith('/due-work') %}active{% endif %}" href="/due-work">维系与回收</a>
             <a class="{% if path.startswith('/reviews') %}active{% endif %}" href="/reviews">审核中心</a>
             <a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>
             <a class="{% if path.startswith('/imports') or path.startswith('/exports') %}active{% endif %}" href="/imports">导入导出</a>
+          </details>
+          <details class="nav-section" {% if path.startswith('/due-work') or path.startswith('/daily-recycles') %}open{% endif %}>
+            <summary>日常运维</summary>
+            <a class="{% if path.startswith('/due-work') %}active{% endif %}" href="/due-work?type=renew">客户维系登记</a>
+            <a class="{% if path.startswith('/daily-recycles') %}active{% endif %}" href="/daily-recycles">设备回收登记</a>
           </details>
           <details class="nav-section" {% if path.startswith('/contacts') or path.startswith('/scan-schedules') or path.startswith('/scripts') or path.startswith('/calls') or path.startswith('/sms') %}open{% endif %}>
             <summary>回访与通话</summary>
