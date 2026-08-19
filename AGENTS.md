@@ -2,14 +2,15 @@
 
 本文件是 AI 编码代理在本仓库中的工作约定。开始修改前，先阅读本文件、
 `README.md`、`TODO.md`，以及与任务相关的代码。产品范围和状态定义以
-`docs/callback-demo-plan.md` 为准；若代码与设计文档不一致，应先指出差异，
-不要静默扩大范围。
+`docs/product.md` 与 `docs/hardware.md` 为准；若代码与设计文档不一致，应先
+指出差异，不要静默扩大范围。
 
 ## 项目目标
 
-这是运行在 Rock Pi 3A 上的最小电话回访管理 Demo：FastAPI 后台按计划生成
-单通道外呼任务，A7670E 负责拨号，电话接通后由本机通过 `aplay` 播放 WAV，
-系统保存任务、通话记录及串口事件。
+这是运行在 Rock Pi 3A 上的内网运营支撑助手：FastAPI 后台扫描协议到期、
+退网设备回收和审核卡单，生成面向运维工作人员的通知任务。A7670E 单通道
+串行发送电话和短信，电话接通后由本机通过 `ffmpeg` 输出音频；系统保存任务、
+通知记录及串口事件。
 
 第一版明确不实现实时 AI 对话、ASR、录音、DTMF、抢断或通话中的动态生成。
 不要在无明确需求时引入这些能力。
@@ -54,19 +55,21 @@ uv run pytest -q
 
 - `app/main.py`：FastAPI 生命周期、登录保护、SSR 页面与表单路由。
 - `app/config.py`：环境变量读取、运行时配置和存储目录初始化。
-- `app/models.py`：SQLAlchemy 数据模型和通话主状态集合。
+- `app/models.py`：SQLAlchemy 数据模型和通话主状态集合（产品基线见
+  `docs/product.md`，硬件状态见 `docs/hardware.md`）。
 - `app/services/`：customers（默认联系人）、dictionaries（字典）、ledger（台账
   校验/缺项/审计）、imports（台账导入暂存）、users（密码哈希/角色）等业务逻辑。
 - `alembic/`：数据库迁移脚本；初始版本含完整新 schema，种子版本预置字典、
   权限和岗位角色。
-- `app/services/plans.py`：计划校验、下一次执行时间、任务入队和重启恢复。
+- `app/services/plans.py`：历史计划时间计算、任务入队、人工任务服务和重启恢复。
+- `app/services/scans.py`：三类运营扫描、同日去重、话术渲染及语音/短信任务生成。
 - `app/scheduler.py`：APScheduler 定时扫描，只负责把到期计划放入队列。
-- `app/services/call_worker.py`：单通道任务消费者；当前只有领取任务和前置校验
-  骨架，真实拨号状态机尚未完成。
+- `app/services/call_worker.py`：单通道任务消费者，负责语音/短信串行、拨号
+  状态机和事件落库。
 - `app/modem/client.py`：A7670E 串口命令和读取封装。
 - `app/modem/parser.py`：将模块原始行解析成结构化事件。
-- `app/audio.py`：本地 WAV 播放封装。
-- `app/tts/`：TTS Provider 接口；当前 `none` Provider 不生成音频。
+- `app/audio.py`：本地音频播放和文件存储封装。
+- `app/tts/`：TTS Provider 接口；当前支持 `edge` 和不生成音频的 `none`。
 - `scripts/hardware_smoke.py`：人工执行的最小拨号和音频链路验收脚本。
 - `app/templates/`、`app/static/`：Jinja2 后台页面及本地静态资源。
 - `tests/`：无需真实串口、声卡或外呼即可执行的自动化测试。
@@ -76,8 +79,8 @@ uv run pytest -q
 - A7670E 只有一路通话能力。任何队列实现都必须保证同一时刻最多处理一条
   `CallTask`，排序为 `due_at`、`created_at` 升序。
 - Scheduler 只生成任务，不直接拨号；Call Worker 才能访问串口和播放音频。
-- Web 服务目前不会自动启动 Call Worker。这是防止开发或测试时误拨电话的
-  安全边界。接入自动 Worker 前，必须增加显式配置开关并默认关闭。
+- Web 服务只在显式设置 `CALL_WORKER_ENABLED=1` 时启动 Call Worker，且还受
+  管理页运行时开关控制；环境变量默认关闭，这是防止开发或测试误拨的安全边界。
 - 真实硬件操作不得出现在模块导入、数据库迁移、页面请求或普通单元测试中。
 - 每条串口收发、URC、状态变化、播放开始/结束和错误都应保存为对应
   `CallRecord` 的 `CallEvent`，不能只打印到控制台。
@@ -106,7 +109,7 @@ uv run pytest -q
 
 - Parser、计划计算、状态转换、重试和重启恢复应使用纯单元测试覆盖。
 - 数据库相关测试使用临时 SQLite 数据库，不读写 `data/app.db`。
-- 自动化测试必须 mock 串口和 `aplay`；不得拨打真实号码。
+- 自动化测试必须 mock 串口和 `ffmpeg`；不得拨打真实号码。
 - 涉及 Web 路由时，覆盖未登录重定向、合法提交和非法输入。
 - 涉及硬件的修改除自动化测试外，还要给出明确的人工验收命令和预期事件。
 

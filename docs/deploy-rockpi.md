@@ -2,7 +2,7 @@
 
 本文是 Rock Pi 3A（aarch64 / Debian 系）上的部署操作手册，覆盖串口权限、
 声卡选择、`uv sync`、`.env` 配置、数据库迁移、systemd 服务与验证步骤。
-产品范围与硬件约束见 `docs/callback-demo-plan.md`，数据库迁移原则见
+产品范围与交互现状见 `docs/product.md`，硬件约束见 `docs/hardware.md`，数据库迁移原则见
 `docs/migration-plan.md`，服务单元示例见 `scripts/systemd/`。
 
 ## 进程架构（先读这一段）
@@ -134,12 +134,7 @@ ffmpeg -hide_banner -loglevel error -i /path/to/test.wav -f alsa plughw:1,0
 - 如果试播无声，检查音量：`alsamixer -c 1`（或
   `amixer -c 1 set Master 80%`），确认 rk809 的 Playback 通道未静音、音量
   足够；后续还要验收 3.5mm → A7670E 的上行音频链路（对端能否听到），见
-  `docs/callback-demo-plan.md`「硬件与运行环境」。
-- 试播确认后把 `AUDIO_DEVICE` 配置为同一值（如 `plughw:1,0`），见第 5 节。
-- 如果试播无声，检查音量：`alsamixer -c 1`（或
-  `amixer -c 1 set Master 80%`），确认 rk809 的 Playback 通道未静音、音量
-  足够；后续还要验收 3.5mm → A7670E 的上行音频链路（对端能否听到），见
-  `docs/callback-demo-plan.md`「硬件与运行环境」。
+  `docs/hardware.md`「硬件环境与验收」。
 - 试播确认后把 `AUDIO_DEVICE` 配置为同一值（如 `plughw:1,0`），见第 5 节。
 
 ## 4. 获取代码与安装依赖
@@ -167,6 +162,7 @@ chmod 600 .env   # 敏感文件，仅属主可读写
 | `ADMIN_PASSWORD` | Web 后台登录密码（用户名 `admin`）。**必须替换**为强密码；为空或保留 `change-me` 时服务拒绝启动。 |
 | `SESSION_SECRET` | 签名登录会话 Cookie 的密钥。**必须替换**为不可预测的随机字符串；为空或保留 `change-me-too` 时服务拒绝启动。 |
 | `CALL_WORKER_ENABLED` | 外呼 Worker 自动启动**硬开关**，默认 `0`。只有确认硬件链路（串口、声卡、音频上行）后再设为 `1`；`0` 时即使管理页开关打开 Worker 也不会启动。 |
+| `SMS_ENABLED` | A7670E 短信发送硬开关，默认 `0`；只有扫描配置同时勾选短信时才会发送。 |
 | `MODEM_PORT` | A7670E 串口路径，默认为 `/dev/ttyUSB1`，按第 2 节核对。 |
 | `AUDIO_DEVICE` | 声卡设备，默认为 `plughw:1,0`，按第 3 节核对。 |
 | `DATABASE_URL` | SQLite 路径，默认 `sqlite:///./data/app.db`，一般不用改。 |
@@ -263,9 +259,10 @@ sudo systemctl restart callback-demo-web
    "running"、最近扫描时间在刷新；Worker 状态应与 `.env` 硬开关一致
    （未开启时应显示配置未开启的引导）。
 
-4. **调度验证**（不打真电话）：创建客户 → 话术 → 一个 `once` 计划（未来
-   几分钟）→ 观察任务入队；或直接点「立即拨打一次」看任务进入队列。此时
-   Worker 若未开启，任务停留在 `queued`，这是预期行为。
+4. **调度验证**（不打真电话）：保持 `CALL_WORKER_ENABLED=0`，准备一条满足
+   扫描条件且有关联负责人的已审核台账数据，在 `/scan-schedules` 创建近期触发的
+   扫描配置，观察 `/calls` 中生成 `queued` 任务。Worker 未开启时任务保持排队，
+   这是预期行为。
 
 5. **硬件 smoke test（人工执行！）**：真实拨号只能由操作者提供明确测试号码
    后人工运行，代理和自动化测试不得执行：
@@ -274,15 +271,16 @@ sudo systemctl restart callback-demo-web
    uv run python scripts/hardware_smoke.py <测试号码> /path/to/test.wav
    ```
 
-   期望事件（`docs/callback-demo-plan.md` 有完整日志样例）：`VOICE CALL:
+   期望事件（`docs/hardware.md` 有完整日志样例）：`VOICE CALL:
    BEGIN` → ffmpeg exit=0 → `VOICE CALL: END` → `NO CARRIER`，串口干净释放。
    **先决条件**：如果 Web 服务的 Worker 已开启，先到管理页关闭 Worker 运行时
    开关（或 `sudo systemctl stop callback-demo-web`），避免与 smoke test 抢
    串口。
 
-6. **应用级端到端（人工验收）**：`CALL_WORKER_ENABLED=1` + 管理页打开 Worker
-   开关，从「立即拨打一次」发起真实外呼，确认对端能听到完整测试音、任务
-   状态变为 `completed`、通话详情时间线事件完整落库。
+6. **应用级端到端（人工验收）**：先由扫描配置生成一条已核对号码和话术的
+   `queued` 任务，再设置 `CALL_WORKER_ENABLED=1` 并在管理页打开 Worker 开关；
+   确认对端能听到完整测试音、任务变为 `completed`、通话详情时间线事件完整
+   落库。当前没有“立即拨打一次”的页面入口。
 
 ## 9. 更新与日常运维
 
