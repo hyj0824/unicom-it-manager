@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}{{ app_title }}{% endblock %}</title>
+    <link rel="icon" type="image/png" href="/static/unicom-icon.png">
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body class="{% if not is_authenticated %}auth-page{% endif %}">
@@ -11,7 +12,7 @@
       {% set path = request.url.path %}
       <aside class="sidebar">
         <div class="brand">
-          <span class="brand-mark">联通</span>
+          <img class="brand-mark" src="/static/unicom-icon.png" alt="中国联通">
           <span>中国联通</span>
         </div>
         <nav class="nav" aria-label="主导航">

@@ -4,18 +4,18 @@
   <main class="login-wrap">
     <section class="login-panel">
       <div class="brand login-brand">
-        <span class="brand-mark">联通</span>
+        <img class="brand-mark" src="/static/unicom-icon.png" alt="中国联通">
         <span>中国联通</span>
       </div>
       <h1>登录</h1>
-      <p class="login-hint">IT 运维客户信息管理系统。管理员使用 admin 账号和 ADMIN_PASSWORD；其他用户使用分配的用户名与密码。</p>
+      <p class="login-hint">IT 运维客户信息管理系统<br />超管用户名为 admin，密码在 .env 文件配置</p>
       {% if error %}
         <div class="alert error">{{ error }}</div>
       {% endif %}
       <form method="post" action="/login" class="stack">
         <label>
           用户名
-          <input name="username" value="admin" autofocus required>
+          <input name="username" autofocus required>
         </label>
         <label>
           密码
