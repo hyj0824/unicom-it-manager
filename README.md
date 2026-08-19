@@ -17,13 +17,17 @@
 客户本人；通知任务由每日扫描自动生成，扫描配置可勾选同步短信通知（A7670E
 短信通道，Worker 空闲时串行发送），管理员不再手动设置客户回访计划。
 
-The original callback details remain in `docs/callback-demo-plan.md`; the
-expanded product baselines are in:
+文档地图：
 
-- `docs/data-model-baseline.md`
-- `docs/permission-workflow-baseline.md`
-- `docs/ui-baseline.md`
-- `docs/migration-plan.md`
+- [`docs/product.md`](docs/product.md)：产品定位、范围、数据模型、权限审核和
+  Web 交互基线，并明确已实现与规划中功能。
+- [`docs/hardware.md`](docs/hardware.md)：A7670E、通话状态/事件、队列重试、
+  音频 TTS 和短信技术参考。
+- [`docs/changelog.md`](docs/changelog.md)：已完成开发历史归档。
+- [`TODO.md`](TODO.md)：当前待办、人工验收项和明确延期。
+- [`docs/import-guide.md`](docs/import-guide.md)：台账导入表头与暂存更正规则。
+- [`docs/migration-plan.md`](docs/migration-plan.md)：SQLite/Alembic 迁移与备份方案。
+- [`docs/deploy-rockpi.md`](docs/deploy-rockpi.md)：Rock Pi 3A 部署手册。
 
 ## Run
 
