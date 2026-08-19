@@ -1,101 +1,42 @@
 {% extends "base.html" %}
 {% block page_title %}业务台账{% endblock %}
 {% block content %}
-  <div class="grid form-list">
-    <section class="panel">
-      <div class="panel-head">
-        <h2>{{ "编辑业务" if edit_service else "新增业务" }}</h2>
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  {% set fd = form_data %}
+  {% set selected_customer = edit_service.customer if edit_service else none %}
+  <section class="panel ledger-page">
+    <div class="panel-head">
+      <div>
+        <h2>业务台账</h2>
+        <span class="subtle">共 {{ total }} 条业务记录</span>
       </div>
-      {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
-      {% set fd = form_data %}
-      <form class="stack" method="post" action="{{ '/ledger/' ~ edit_service.id ~ '/edit' if edit_service else '/ledger' }}">
-        <label>
-          业务号码
-          <input name="service_number" value="{{ fd.get('service_number', edit_service.service_number if edit_service else '') }}" required>
-        </label>
-        <label>
-          客户
-          <select name="customer_id" required>
-            <option value="">选择客户</option>
-            {% for customer in customers %}
-              <option value="{{ customer.id }}" {% if (fd.get('customer_id') or (edit_service.customer_id if edit_service else ''))|string == customer.id|string %}selected{% endif %}>{{ customer.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <div class="grid two">
-          <label>
-            县分
-            <input class="dictionary-input" name="county" list="county-options" autocomplete="off"
-                   value="{{ fd.get('county', edit_service.county_item.label if edit_service and edit_service.county_item else '') }}"
-                   placeholder="输入或搜索县分">
-            <datalist id="county-options">{% for item in counties %}<option value="{{ item.label }}">{% endfor %}</datalist>
-          </label>
-          <label>
-            网格
-            <input class="dictionary-input" name="grid" list="grid-options" autocomplete="off"
-                   value="{{ fd.get('grid', edit_service.grid_item.label if edit_service and edit_service.grid_item else '') }}"
-                   placeholder="输入或搜索网格">
-            <datalist id="grid-options">{% for item in grids %}<option value="{{ item.label }}">{% endfor %}</datalist>
-          </label>
-          <label>
-            服务状态
-            <input class="dictionary-input" name="service_status" list="service-status-options" autocomplete="off"
-                   value="{{ fd.get('service_status', edit_service.service_status_item.label if edit_service and edit_service.service_status_item else '') }}"
-                   placeholder="输入或搜索服务状态">
-            <datalist id="service-status-options">{% for item in service_statuses %}<option value="{{ item.label }}">{% endfor %}</datalist>
-          </label>
-          <label>
-            业务类型
-            <input class="dictionary-input" name="business_type" list="business-type-options" autocomplete="off"
-                   value="{{ fd.get('business_type', edit_service.business_type_item.label if edit_service and edit_service.business_type_item else '') }}"
-                   placeholder="输入或搜索业务类型">
-            <datalist id="business-type-options">{% for item in business_types %}<option value="{{ item.label }}">{% endfor %}</datalist>
-          </label>
-          <label>
-            入网时间
-            <input type="date" name="accessed_at" value="{{ fd.get('accessed_at', edit_service.accessed_at|date if edit_service else '') }}">
-          </label>
-          <label>
-            协议到期时间
-            <input type="date" name="agreement_expires_at" value="{{ fd.get('agreement_expires_at', edit_service.agreement_expires_at|date if edit_service else '') }}">
-          </label>
-        </div>
-        <label>
-          渠道名称
-          <input name="channel_name" value="{{ fd.get('channel_name', edit_service.channel_name if edit_service else '') }}">
-        </label>
-        <div class="button-row">
-          <button class="button primary" type="submit">{{ "保存修改" if edit_service else "创建业务" }}</button>
-          {% if edit_service %}<a class="button ghost" href="/ledger">取消</a>{% endif %}
-        </div>
-      </form>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <h2>业务列表</h2>
-      </div>
-      <form class="filter-bar" method="get" action="/ledger">
-        <input name="q" value="{{ q }}" placeholder="业务号码 / 客户名称">
-        <select name="county_id">
-          <option value="">全部县分</option>
-          {% for item in counties %}
-            <option value="{{ item.id }}" {% if county_id == item.id %}selected{% endif %}>{{ item.label }}</option>
-          {% endfor %}
-        </select>
-        <select name="status_id">
-          <option value="">全部服务状态</option>
-          {% for item in service_statuses %}
-            <option value="{{ item.id }}" {% if status_id == item.id %}selected{% endif %}>{{ item.label }}</option>
-          {% endfor %}
-        </select>
-        <button class="button secondary" type="submit">筛选</button>
-        <a class="button ghost" href="/ledger">重置</a>
-      </form>
-      <div class="table-wrap">
+      <button class="button primary" type="button" data-modal-open="ledger-modal" data-modal-title="新增业务">新增业务</button>
+    </div>
+    <form class="filter-bar" method="get" action="/ledger">
+      <input name="q" value="{{ q }}" placeholder="业务号码 / 客户名称" aria-label="搜索业务">
+      <label class="filter-field">县分
+        <input list="county-options" value="{% for item in counties %}{% if item.id == county_id %}{{ item.label }}{% endif %}{% endfor %}" data-lookup-target="ledger-filter-county-id" autocomplete="off" placeholder="全部县分">
+        <input type="hidden" id="ledger-filter-county-id" name="county_id" value="{{ county_id or '' }}">
+      </label>
+      <label class="filter-field">网格
+        <input list="grid-options" value="{% for item in grids %}{% if item.id == grid_id %}{{ item.label }}{% endif %}{% endfor %}" data-lookup-target="ledger-filter-grid-id" autocomplete="off" placeholder="全部网格">
+        <input type="hidden" id="ledger-filter-grid-id" name="grid_id" value="{{ grid_id or '' }}">
+      </label>
+      <label class="filter-field">服务状态
+        <input list="service-status-options" value="{% for item in service_statuses %}{% if item.id == status_id %}{{ item.label }}{% endif %}{% endfor %}" data-lookup-target="ledger-filter-status-id" autocomplete="off" placeholder="全部状态">
+        <input type="hidden" id="ledger-filter-status-id" name="status_id" value="{{ status_id or '' }}">
+      </label>
+      <label class="filter-field">业务类型
+        <input list="business-type-options" value="{% for item in business_types %}{% if item.id == business_type_id %}{{ item.label }}{% endif %}{% endfor %}" data-lookup-target="ledger-filter-business-type-id" autocomplete="off" placeholder="全部类型">
+        <input type="hidden" id="ledger-filter-business-type-id" name="business_type_id" value="{{ business_type_id or '' }}">
+      </label>
+      <button class="button secondary" type="submit">筛选</button>
+      <a class="button ghost" href="/ledger">重置</a>
+    </form>
+    <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>业务号码</th><th>客户</th><th>县分</th><th>网格</th><th>服务状态</th><th>业务类型</th><th>协议到期</th><th class="actions-col">操作</th></tr>
+          <tr><th>业务号码</th><th>客户名称</th><th>县分</th><th>网格</th><th>服务状态</th><th>业务类型</th><th>入网时间</th><th>协议到期时间</th><th class="actions-col">操作</th></tr>
         </thead>
         <tbody>
           {% for service in services %}
@@ -104,28 +45,65 @@
               <td>{{ service.customer.name }}</td>
               <td>{{ service.county_item.label if service.county_item else "-" }}</td>
               <td>{{ service.grid_item.label if service.grid_item else "-" }}</td>
-              <td>
-                {% if service.service_status_item %}
-                  <span class="status-pill muted">{{ service.service_status_item.label }}</span>
-                {% else %}
-                  <span class="status-pill short_call">缺项</span>
-                {% endif %}
-              </td>
+              <td>{% if service.service_status_item %}<span class="status-pill muted">{{ service.service_status_item.label }}</span>{% else %}<span class="status-pill short_call">缺项</span>{% endif %}</td>
               <td>{{ service.business_type_item.label if service.business_type_item else "-" }}</td>
+              <td>{{ service.accessed_at|date or "-" }}</td>
               <td>{{ service.agreement_expires_at|date or "-" }}</td>
               <td class="actions">
-                <a class="button secondary small" href="/ledger?edit_id={{ service.id }}">编辑</a>
+                <button class="button secondary small" type="button" data-modal-open="ledger-modal" data-modal-title="编辑业务" data-edit-action="/ledger/{{ service.id }}/edit"
+                        data-field-service_number="{{ service.service_number }}" data-field-customer_search="{{ service.customer.name }}" data-field-customer_id="{{ service.customer_id }}"
+                        data-field-county="{{ service.county_item.label if service.county_item else '' }}" data-field-grid="{{ service.grid_item.label if service.grid_item else '' }}"
+                        data-field-service_status="{{ service.service_status_item.label if service.service_status_item else '' }}" data-field-business_type="{{ service.business_type_item.label if service.business_type_item else '' }}"
+                        data-field-channel_name="{{ service.channel_name }}" data-field-accessed_at="{{ service.accessed_at|date }}" data-field-agreement_expires_at="{{ service.agreement_expires_at|date }}">编辑</button>
                 <form method="post" action="/ledger/{{ service.id }}/delete" data-confirm="作废该业务？所属设备需先处理。">
                   <button class="button danger small" type="submit">作废</button>
                 </form>
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="8" class="empty">暂无业务记录。</td></tr>
+            <tr><td colspan="9" class="empty">暂无业务记录。</td></tr>
           {% endfor %}
         </tbody>
       </table>
-      </div>
+    </div>
+    <div class="panel-foot pagination">
+      <span class="subtle">第 {{ page }} / {{ last_page }} 页，共 {{ total }} 条</span>
+      {% set base_qs = 'q=' ~ q ~ '&county_id=' ~ county_id ~ '&grid_id=' ~ grid_id ~ '&status_id=' ~ status_id ~ '&business_type_id=' ~ business_type_id %}
+      {% if page > 1 %}<a class="button secondary small" href="/ledger?{{ base_qs }}&page={{ page - 1 }}">上一页</a>{% endif %}
+      {% for number in range(1, last_page + 1) %}
+        <a class="button {{ 'primary' if number == page else 'secondary' }} small" href="/ledger?{{ base_qs }}&page={{ number }}">{{ number }}</a>
+      {% endfor %}
+      {% if page < last_page %}<a class="button secondary small" href="/ledger?{{ base_qs }}&page={{ page + 1 }}">下一页</a>{% endif %}
+    </div>
+  </section>
+
+  <datalist id="county-options">{% for item in counties %}<option value="{{ item.label }}" data-id="{{ item.id }}"></option>{% endfor %}</datalist>
+  <datalist id="grid-options">{% for item in grids %}<option value="{{ item.label }}" data-id="{{ item.id }}"></option>{% endfor %}</datalist>
+  <datalist id="service-status-options">{% for item in service_statuses %}<option value="{{ item.label }}" data-id="{{ item.id }}"></option>{% endfor %}</datalist>
+  <datalist id="business-type-options">{% for item in business_types %}<option value="{{ item.label }}" data-id="{{ item.id }}"></option>{% endfor %}</datalist>
+  <datalist id="customer-options">{% for customer in customers %}<option value="{{ customer.name }}" data-id="{{ customer.id }}"></option>{% endfor %}</datalist>
+
+  <div class="modal" id="ledger-modal" role="dialog" aria-modal="true" aria-labelledby="ledger-modal-title"{% if edit_service %} data-modal-auto-open="true"{% endif %}>
+    <div class="modal-backdrop" data-modal-close></div>
+    <section class="modal-dialog">
+      <div class="panel-head"><h2 id="ledger-modal-title">{{ "编辑业务" if edit_service else "新增业务" }}</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
+      <form class="stack" method="post" action="{{ '/ledger/' ~ edit_service.id ~ '/edit' if edit_service else '/ledger' }}" data-modal-form data-default-action="/ledger">
+        <label>业务号码<input name="service_number" data-modal-field="service_number" value="{{ fd.get('service_number', edit_service.service_number if edit_service else '') }}" required></label>
+        <label>客户
+          <input name="customer_search" data-modal-field="customer_search" list="customer-options" data-lookup-target="ledger-customer-id" autocomplete="off" value="{{ selected_customer.name if selected_customer else '' }}" placeholder="输入或搜索客户名称" required>
+          <input type="hidden" id="ledger-customer-id" name="customer_id" data-modal-field="customer_id" value="{{ edit_service.customer_id if edit_service else '' }}">
+        </label>
+        <div class="grid two">
+          <label>县分<input class="dictionary-input" name="county" data-modal-field="county" list="county-options" autocomplete="off" value="{{ fd.get('county', edit_service.county_item.label if edit_service and edit_service.county_item else '') }}" placeholder="输入或搜索县分"></label>
+          <label>网格<input class="dictionary-input" name="grid" data-modal-field="grid" list="grid-options" autocomplete="off" value="{{ fd.get('grid', edit_service.grid_item.label if edit_service and edit_service.grid_item else '') }}" placeholder="输入或搜索网格"></label>
+          <label>服务状态<input class="dictionary-input" name="service_status" data-modal-field="service_status" list="service-status-options" autocomplete="off" value="{{ fd.get('service_status', edit_service.service_status_item.label if edit_service and edit_service.service_status_item else '') }}" placeholder="输入或搜索服务状态"></label>
+          <label>业务类型<input class="dictionary-input" name="business_type" data-modal-field="business_type" list="business-type-options" autocomplete="off" value="{{ fd.get('business_type', edit_service.business_type_item.label if edit_service and edit_service.business_type_item else '') }}" placeholder="输入或搜索业务类型"></label>
+          <label>入网时间<input type="date" name="accessed_at" data-modal-field="accessed_at" value="{{ fd.get('accessed_at', edit_service.accessed_at|date if edit_service else '') }}"></label>
+          <label>协议到期时间<input type="date" name="agreement_expires_at" data-modal-field="agreement_expires_at" value="{{ fd.get('agreement_expires_at', edit_service.agreement_expires_at|date if edit_service else '') }}"></label>
+        </div>
+        <label>渠道名称<input name="channel_name" data-modal-field="channel_name" value="{{ fd.get('channel_name', edit_service.channel_name if edit_service else '') }}"></label>
+        <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
+      </form>
     </section>
   </div>
 {% endblock %}
