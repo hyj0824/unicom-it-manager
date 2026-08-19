@@ -1018,7 +1018,7 @@ def reviews_page(request: Request, status_filter: str = "", db: Session = Depend
     )
 
 
-# ---------------------------------------------------------------- 维系与回收工作台
+# ---------------------------------------------------------------- 日常运维登记
 
 
 def due_work_template(
@@ -1027,6 +1027,7 @@ def due_work_template(
     error: str = "",
     notice: str = "",
     status_code: int = 200,
+    page_type: str = "renew",
 ):
     timezone_name = settings.default_timezone
     return render(
@@ -1034,9 +1035,18 @@ def due_work_template(
         "due_work.html",
         db,
         status_code=status_code,
+        page_type=page_type,
         lead_days=change_request_service.due_renewal_lead_days(db),
-        due_rows=change_request_service.list_due_renewal_rows(db, timezone_name=timezone_name),
-        device_rows=change_request_service.list_recycle_device_rows(db, timezone_name=timezone_name),
+        due_rows=(
+            change_request_service.list_due_renewal_rows(db, timezone_name=timezone_name)
+            if page_type == "renew"
+            else []
+        ),
+        device_rows=(
+            change_request_service.list_recycle_device_rows(db, timezone_name=timezone_name)
+            if page_type == "recycle"
+            else []
+        ),
         min_date=datetime.now(plan_service.get_zone(timezone_name)).date().isoformat(),
         error=error,
         notice=notice,
@@ -1046,12 +1056,32 @@ def due_work_template(
 @app.get("/due-work")
 def due_work_page(
     request: Request,
+    type: str = "",
     error: str = "",
     notice: str = "",
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
-    return due_work_template(request, db, error=error, notice=notice)
+    if type == "renew":
+        return due_work_template(
+            request, db, error=error, notice=notice, page_type="renew"
+        )
+    if type == "recycle":
+        return redirect_to("/daily-recycles")
+    return redirect_to("/due-work?type=renew")
+
+
+@app.get("/daily-recycles")
+def daily_recycles_page(
+    request: Request,
+    error: str = "",
+    notice: str = "",
+    db: Session = Depends(get_db),
+):
+    auth.require_login(request)
+    return due_work_template(
+        request, db, error=error, notice=notice, page_type="recycle"
+    )
 
 
 def _submit_business_request(
@@ -1076,7 +1106,9 @@ def _submit_business_request(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        return due_work_template(request, db, error=str(exc), status_code=400)
+        return due_work_template(
+            request, db, error=str(exc), status_code=400, page_type="renew"
+        )
     return redirect_to(f"/reviews/{change_set.id}")
 
 
@@ -1116,7 +1148,9 @@ async def due_work_recover(device_id: int, request: Request, db: Session = Depen
         db.commit()
     except ValueError as exc:
         db.rollback()
-        return due_work_template(request, db, error=str(exc), status_code=400)
+        return due_work_template(
+            request, db, error=str(exc), status_code=400, page_type="recycle"
+        )
     return redirect_to(f"/reviews/{change_set.id}")
 
 

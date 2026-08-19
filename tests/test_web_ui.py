@@ -114,6 +114,7 @@ def make_scan_schedule(
     script: Script | None = None,
     enabled: bool = True,
     sms_enabled: bool = False,
+    lead_days: int = 14,
 ) -> ScanSchedule:
     with SessionLocal() as session:
         schedule = ScanSchedule(
@@ -122,7 +123,7 @@ def make_scan_schedule(
             script_id=script.id if script else None,
             cron_expr=cron,
             timezone=timezone_name,
-            lead_days=14,
+            lead_days=lead_days,
             enabled=enabled,
             sms_enabled=sms_enabled,
         )
@@ -160,7 +161,17 @@ def make_task_record(
 
 
 def test_login_required_redirects(client: TestClient) -> None:
-    for path in ["/", "/calls", "/scan-schedules", "/contacts", "/scripts", "/admin/system", "/sms"]:
+    for path in [
+        "/",
+        "/calls",
+        "/scan-schedules",
+        "/contacts",
+        "/scripts",
+        "/admin/system",
+        "/sms",
+        "/due-work?type=renew",
+        "/daily-recycles",
+    ]:
         resp = client.get(path, follow_redirects=False)
         assert resp.status_code == 303, path
         assert resp.headers["location"] == "/login", path
@@ -782,6 +793,113 @@ def test_nav_section_open_on_contacts_page(client: TestClient) -> None:
         assert start != -1, page
         seg = html[start:summary_idx]
         assert ("open" in seg) is expected_open, page
+
+
+def test_daily_operations_pages_and_existing_submit_routes(client: TestClient) -> None:
+    login(client)
+    make_scan_schedule(lead_days=21)
+    customer = make_customer("日常运维客户")
+    with SessionLocal() as session:
+        due_service = BusinessService(
+            service_number="DAILY-RENEW-001",
+            customer_id=customer.id,
+            agreement_expires_at=utcnow() + timedelta(days=5),
+        )
+        retired_service = BusinessService(
+            service_number="DAILY-RECYCLE-001",
+            customer_id=customer.id,
+            agreement_expires_at=utcnow() - timedelta(days=5),
+        )
+        session.add_all([due_service, retired_service])
+        session.flush()
+        device = NetworkDevice(
+            device_code="DAILY-DEVICE-001",
+            business_service_id=retired_service.id,
+        )
+        session.add(device)
+        session.commit()
+        due_service_id = due_service.id
+        device_id = device.id
+
+    legacy = client.get("/due-work", follow_redirects=False)
+    assert legacy.status_code == 303
+    assert legacy.headers["location"] == "/due-work?type=renew"
+
+    renew_page = client.get("/due-work?type=renew")
+    assert renew_page.status_code == 200
+    assert "客户维系登记" in renew_page.text
+    assert "提前 21 天" in renew_page.text
+    assert "DAILY-RENEW-001" in renew_page.text
+    assert "DAILY-DEVICE-001" not in renew_page.text
+    assert f'/due-work/business/{due_service_id}/renew' in renew_page.text
+    assert f'/due-work/business/{due_service_id}/retire' in renew_page.text
+
+    recycle_page = client.get("/daily-recycles")
+    assert recycle_page.status_code == 200
+    assert "设备回收登记" in recycle_page.text
+    assert "DAILY-DEVICE-001" in recycle_page.text
+    assert "DAILY-RENEW-001" not in recycle_page.text
+    assert f'/due-work/device/{device_id}/recover' in recycle_page.text
+
+    renewed = client.post(
+        f"/due-work/business/{due_service_id}/renew",
+        data={
+            "agreement_expires_at": (utcnow() + timedelta(days=365)).date().isoformat(),
+            "reason": "客户确认续签",
+        },
+        follow_redirects=False,
+    )
+    assert renewed.status_code == 303
+    assert renewed.headers["location"].startswith("/reviews/")
+
+    recovered = client.post(
+        f"/due-work/device/{device_id}/recover",
+        data={"reason": "设备已回收入库"},
+        follow_redirects=False,
+    )
+    assert recovered.status_code == 303
+    assert recovered.headers["location"].startswith("/reviews/")
+
+
+def test_navigation_groups_data_management_and_daily_operations(client: TestClient) -> None:
+    login(client)
+    html = client.get("/due-work?type=renew").text
+
+    assert "数据录入" not in html
+    data_start = html.index("<summary>数据管理")
+    data_end = html.index("</details>", data_start)
+    data_section = html[data_start:data_end]
+    expected_links = [
+        'href="/ledger">业务台账',
+        'href="/devices">网络设备',
+        'href="/reviews">审核中心',
+        'href="/missing">缺项工作台',
+        'href="/imports">导入导出',
+    ]
+    assert all(link in data_section for link in expected_links)
+    assert [data_section.index(link) for link in expected_links] == sorted(
+        data_section.index(link) for link in expected_links
+    )
+    assert "客户维系登记" not in data_section
+    assert "设备回收登记" not in data_section
+
+    daily_start = html.index("<summary>日常运维")
+    daily_end = html.index("</details>", daily_start)
+    daily_section = html[daily_start:daily_end]
+    daily_details = html[
+        html.rfind('<details class="nav-section"', 0, daily_start):daily_start
+    ]
+    assert "open" in daily_details
+    assert 'href="/due-work?type=renew">客户维系登记' in daily_section
+    assert 'href="/daily-recycles">设备回收登记' in daily_section
+
+    recycle_html = client.get("/daily-recycles").text
+    recycle_start = recycle_html.index("<summary>日常运维")
+    recycle_details = recycle_html[
+        recycle_html.rfind('<details class="nav-section"', 0, recycle_start):recycle_start
+    ]
+    assert "open" in recycle_details
+    assert 'class="active" href="/daily-recycles"' in recycle_html
 
 
 def test_ledger_is_paginated_and_uses_modal_lookup_controls(client: TestClient) -> None:
