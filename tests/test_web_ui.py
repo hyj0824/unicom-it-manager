@@ -33,6 +33,8 @@ from app.models import (
     CallRecord,
     CallTask,
     Customer,
+    BusinessService,
+    NetworkDevice,
     ScanSchedule,
     Script,
     utcnow,
@@ -780,3 +782,61 @@ def test_nav_section_open_on_contacts_page(client: TestClient) -> None:
         assert start != -1, page
         seg = html[start:summary_idx]
         assert ("open" in seg) is expected_open, page
+
+
+def test_ledger_is_paginated_and_uses_modal_lookup_controls(client: TestClient) -> None:
+    login(client)
+    customer = make_customer("分页客户")
+    with SessionLocal() as session:
+        session.add_all(
+            [BusinessService(service_number=f"LEDGER-{i:03d}", customer_id=customer.id) for i in range(51)]
+        )
+        session.commit()
+
+    page1 = client.get("/ledger", params={"q": "LEDGER"})
+    assert page1.status_code == 200
+    assert "第 1 / 2 页" in page1.text
+    assert "共 51 条" in page1.text
+    assert 'data-modal-open="ledger-modal"' in page1.text
+    assert 'list="customer-options"' in page1.text
+    assert 'name="customer_id"' in page1.text
+    page2 = client.get("/ledger", params={"q": "LEDGER", "page": 2})
+    assert "第 2 / 2 页" in page2.text
+    assert "LEDGER-000" in page2.text
+
+
+def test_devices_is_paginated_and_uses_modal_lookup_controls(client: TestClient) -> None:
+    login(client)
+    customer = make_customer("设备分页客户")
+    with SessionLocal() as session:
+        service = BusinessService(service_number="DEVICE-SERVICE", customer_id=customer.id)
+        session.add(service)
+        session.flush()
+        session.add_all(
+            [NetworkDevice(device_code=f"DEVICE-{i:03d}", business_service_id=service.id) for i in range(51)]
+        )
+        session.commit()
+
+    page1 = client.get("/devices", params={"q": "DEVICE"})
+    assert page1.status_code == 200
+    assert "第 1 / 2 页" in page1.text
+    assert "共 51 条" in page1.text
+    assert 'data-modal-open="device-modal"' in page1.text
+    assert 'list="business-service-options"' in page1.text
+    assert 'name="business_service_id"' in page1.text
+    page2 = client.get("/devices", params={"q": "DEVICE", "page": 2})
+    assert "第 2 / 2 页" in page2.text
+    assert "DEVICE-000" in page2.text
+
+
+def test_ledger_and_devices_validation_errors_redirect_to_list(client: TestClient) -> None:
+    login(client)
+    ledger_resp = client.post("/ledger", data={"service_number": "", "customer_id": ""}, follow_redirects=False)
+    assert ledger_resp.status_code == 303
+    assert "error=" in ledger_resp.headers["location"]
+    assert "业务号码不能为空" in client.get(ledger_resp.headers["location"]).text
+
+    device_resp = client.post("/devices", data={"device_code": "", "business_service_id": ""}, follow_redirects=False)
+    assert device_resp.status_code == 303
+    assert "error=" in device_resp.headers["location"]
+    assert "设备编码不能为空" in client.get(device_resp.headers["location"]).text

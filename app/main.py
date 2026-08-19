@@ -659,6 +659,8 @@ def ledger_template(
     county_id: int | None = None,
     grid_id: int | None = None,
     status_id: int | None = None,
+    business_type_id: int | None = None,
+    page: int = 1,
 ):
     query = select(BusinessService).where(BusinessService.is_active.is_(True))
     if q:
@@ -672,7 +674,17 @@ def ledger_template(
         query = query.where(BusinessService.grid_item_id == grid_id)
     if status_id:
         query = query.where(BusinessService.service_status_item_id == status_id)
-    services = db.scalars(query.order_by(BusinessService.created_at.desc()).limit(500)).all()
+    if business_type_id:
+        query = query.where(BusinessService.business_type_item_id == business_type_id)
+    total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
+    page_size = 50
+    last_page = max(1, (total + page_size - 1) // page_size)
+    page = max(1, min(page, last_page))
+    services = db.scalars(
+        query.order_by(BusinessService.created_at.desc(), BusinessService.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
     customers = db.scalars(select(Customer).order_by(Customer.name.asc())).all()
     return render(
         request,
@@ -691,6 +703,10 @@ def ledger_template(
         county_id=county_id or 0,
         grid_id=grid_id or 0,
         status_id=status_id or 0,
+        business_type_id=business_type_id or 0,
+        page=page,
+        total=total,
+        last_page=last_page,
         error=error,
     )
 
@@ -703,6 +719,9 @@ def ledger_page(
     county_id: int | None = None,
     grid_id: int | None = None,
     status_id: int | None = None,
+    business_type_id: int | None = None,
+    page: int = 1,
+    error: str = "",
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
@@ -710,6 +729,7 @@ def ledger_page(
     return ledger_template(
         request, db, edit_service=edit_service, q=q,
         county_id=county_id, grid_id=grid_id, status_id=status_id,
+        business_type_id=business_type_id, page=page, error=error,
     )
 
 
@@ -763,9 +783,9 @@ async def service_create(request: Request, db: Session = Depends(get_db)):
         )
         error = _apply_service_form(service, data, db)
     except ValueError as exc:
-        return ledger_template(request, db, str(exc), dict(form), status_code=400)
+        return redirect_to(f"/ledger?error={quote(str(exc))}")
     if error:
-        return ledger_template(request, db, error, dict(form), status_code=400)
+        return redirect_to(f"/ledger?error={quote(error)}")
     db.add(service)
     db.commit()
     ledger_service.log_action(
@@ -786,9 +806,9 @@ async def service_update(service_id: int, request: Request, db: Session = Depend
         data = _parse_service_form(form)
         error = _apply_service_form(service, data, db)
     except ValueError as exc:
-        return ledger_template(request, db, str(exc), dict(form), edit_service=service, status_code=400)
+        return redirect_to(f"/ledger?error={quote(str(exc))}")
     if error:
-        return ledger_template(request, db, error, dict(form), edit_service=service, status_code=400)
+        return redirect_to(f"/ledger?error={quote(error)}")
     db.commit()
     ledger_service.log_action(
         db, "change", _user_id(request), "business_service", service.id,
@@ -827,6 +847,7 @@ def devices_template(
     status_code: int = 200,
     q: str = "",
     recovery_status_id: int | None = None,
+    page: int = 1,
 ):
     query = select(NetworkDevice).where(NetworkDevice.is_active.is_(True))
     if q:
@@ -836,7 +857,15 @@ def devices_template(
         )
     if recovery_status_id:
         query = query.where(NetworkDevice.recovery_status_item_id == recovery_status_id)
-    devices = db.scalars(query.order_by(NetworkDevice.created_at.desc()).limit(500)).all()
+    total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
+    page_size = 50
+    last_page = max(1, (total + page_size - 1) // page_size)
+    page = max(1, min(page, last_page))
+    devices = db.scalars(
+        query.order_by(NetworkDevice.created_at.desc(), NetworkDevice.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
     services = db.scalars(
         select(BusinessService)
         .where(BusinessService.is_active.is_(True))
@@ -858,6 +887,9 @@ def devices_template(
         form_data=form_data or {},
         q=q,
         recovery_status_id=recovery_status_id or 0,
+        page=page,
+        total=total,
+        last_page=last_page,
         error=error,
     )
 
@@ -868,12 +900,15 @@ def devices_page(
     edit_id: int | None = None,
     q: str = "",
     recovery_status_id: int | None = None,
+    page: int = 1,
+    error: str = "",
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
     edit_device = db.get(NetworkDevice, edit_id) if edit_id else None
     return devices_template(
-        request, db, edit_device=edit_device, q=q, recovery_status_id=recovery_status_id
+        request, db, edit_device=edit_device, q=q, recovery_status_id=recovery_status_id,
+        page=page, error=error,
     )
 
 
@@ -921,9 +956,9 @@ async def device_create(request: Request, db: Session = Depends(get_db)):
         device = NetworkDevice(device_code="", business_service_id=data["business_service_id"] or 0)
         error = _apply_device_form(device, data, db)
     except ValueError as exc:
-        return devices_template(request, db, str(exc), dict(form), status_code=400)
+        return redirect_to(f"/devices?error={quote(str(exc))}")
     if error:
-        return devices_template(request, db, error, dict(form), status_code=400)
+        return redirect_to(f"/devices?error={quote(error)}")
     db.add(device)
     db.commit()
     return redirect_to("/devices")
@@ -938,9 +973,9 @@ async def device_update(device_id: int, request: Request, db: Session = Depends(
         data = _parse_device_form(form)
         error = _apply_device_form(device, data, db)
     except ValueError as exc:
-        return devices_template(request, db, str(exc), dict(form), edit_device=device, status_code=400)
+        return redirect_to(f"/devices?error={quote(str(exc))}")
     if error:
-        return devices_template(request, db, error, dict(form), edit_device=device, status_code=400)
+        return redirect_to(f"/devices?error={quote(error)}")
     db.commit()
     return redirect_to("/devices")
 

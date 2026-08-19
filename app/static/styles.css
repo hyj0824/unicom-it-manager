@@ -161,9 +161,24 @@ a {
   max-width: 320px;
 }
 
-.filter-bar select {
+.filter-bar select,
+.filter-field {
   flex: 0 1 auto;
   width: auto;
+}
+
+.filter-field {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.filter-field input {
+  width: 150px;
+  min-height: 36px;
+  max-width: 180px;
 }
 
 .filter-bar.inline {
@@ -285,6 +300,49 @@ a {
 }
 
 .panel {
+  overflow: hidden;
+}
+
+/* 通用弹窗：页面只保留一份表单，新增和编辑按钮通过 data 属性填充它。 */
+.modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.modal.is-open {
+  display: flex;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 27, 29, 0.56);
+}
+
+.modal-dialog {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: min(860px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+}
+
+.modal-dialog .panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
+body.modal-open {
   overflow: hidden;
 }
 
@@ -1036,6 +1094,7 @@ textarea {
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 /* 维系与回收工作台：表格行内展开的申请表单。 */
