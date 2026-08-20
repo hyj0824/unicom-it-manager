@@ -180,7 +180,7 @@ def _validate_rows(
         if not raw.get("户名"):
             errors.append("客户名称为空")
         for label in ("发展人联系电话", "客户经理联系电话", "网络维护责任人联系电话"):
-            if raw.get(label) and not PHONE_RE.match(raw[label]):
+            if raw.get(label) and not PHONE_RE.match(str(raw[label]).strip()):
                 errors.append(f"{label}格式不正确（{raw[label]}）")
 
         service = existing_services.get(number)
@@ -255,11 +255,10 @@ def _validate_rows(
             "service_status": raw.get("服务状态", ""), "business_type": raw.get("业务类型", ""),
             "channel_name": raw.get("渠道名称", ""), "accessed_at": raw.get("入网时间", ""),
             "agreement_expires_at": raw.get("协议到期时间", ""),
-            "contacts": {
-                "developer": {"name": raw.get("发展人", ""), "phone": raw.get("发展人联系电话", "")},
-                "account_manager": {"name": raw.get("客户经理", ""), "phone": raw.get("客户经理联系电话", "")},
-                "network_maintenance": {"name": raw.get("网络维护责任人", ""), "phone": raw.get("网络维护责任人联系电话", "")},
-            },
+            "developer_name": raw.get("发展人", ""),
+            "developer_phone": raw.get("发展人联系电话", ""),
+            "account_manager_name": raw.get("客户经理", ""),
+            "account_manager_phone": raw.get("客户经理联系电话", ""),
             "devices": devices,
             "source_raw": row.get("source_raw", raw),
         }

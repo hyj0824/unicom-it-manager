@@ -30,8 +30,6 @@ from ..models import (
     CallTask,
     ChangeItem,
     ChangeSet,
-    Contact,
-    CustomerContact,
     NetworkDevice,
     Permission,
     RolePermission,
@@ -75,7 +73,7 @@ SCAN_TYPE_LABELS: dict[str, str] = {
     "review_stuck": "审核卡单提醒",
 }
 
-# 通知对象职责（customer_contacts.duty）。
+# 通知对象职责（负责人字段）。
 DUTY_ACCOUNT_MANAGER = "客户经理"
 DUTY_NETWORK_MAINTENANCE = "网络维护责任人"
 
@@ -147,30 +145,6 @@ def _local_date_utc(now: datetime, timezone_name: str) -> datetime:
 # ---------------------------------------------------------------------------
 # 通用小工具
 # ---------------------------------------------------------------------------
-
-
-def _contact_by_duty(db: Session, customer_id: int, duty: str) -> Contact | None:
-    """取客户启用的指定职责联系人。
-
-    多个启用联系人时优先取有电话号码的（电话是通知通道本身）；
-    全部无电话时取最早创建的一条（由调用方决定是否跳过）。
-    """
-
-    links = db.scalars(
-        select(CustomerContact)
-        .where(
-            CustomerContact.customer_id == customer_id,
-            CustomerContact.duty == duty,
-            CustomerContact.is_active.is_(True),
-        )
-        .order_by(CustomerContact.id.asc())
-    ).all()
-    if not links:
-        return None
-    for link in links:
-        if (link.contact.phone or "").strip():
-            return link.contact
-    return links[0].contact
 
 
 def _existing_target_ids(
@@ -300,9 +274,8 @@ def run_due_renewal_scan(
                 service.service_number,
             )
             continue
-        contact = _contact_by_duty(db, service.customer_id, DUTY_ACCOUNT_MANAGER)
-        phone = (contact.phone or "").strip() if contact else ""
-        if contact is None or not phone:
+        phone = (service.account_manager_phone or "").strip()
+        if not phone:
             logger.info(
                 "扫描 #%s：业务 %s 缺少%s或电话为空，跳过",
                 schedule.id,
@@ -312,20 +285,18 @@ def run_due_renewal_scan(
             continue
         due_date = expires_utc.astimezone(zone).strftime("%Y-%m-%d")
         ctx = {
-            "客户名称": service.customer.name if service.customer else "",
+            "客户名称": service.customer_name,
             "业务号码": service.service_number,
             "协议到期日": due_date,
-            "负责人姓名": (contact.name or "").strip(),
+            "负责人姓名": service.account_manager_name.strip(),
             "扫描类型": SCAN_TYPE_LABELS.get(schedule.scan_type, schedule.scan_type),
         }
         body = render_script_template(template, ctx)
         script = _make_scan_script(db, schedule, body, scan_date)
         task = CallTask(
-            plan=None,
             scan_schedule=schedule,
-            customer_id=service.customer_id,
+            customer_name=service.customer_name,
             script=script,
-            contact=contact,
             dial_number=phone,
             due_at=utcnow(),
             status="queued",
@@ -404,7 +375,7 @@ def run_device_recycle_scan(
     """扫描退网设备回收：退网业务下每台未回收设备生成一条通知任务。
 
     业务退网判定见 `_is_retired_service`；设备是否已回收见 `_device_recovered`；
-    通知对象为 customer_contacts 中职责「网络维护责任人」的启用联系人。
+    通知对象为设备记录中的网络维护责任人。
     """
 
     now_utc = _as_utc(now) if now is not None else utcnow()
@@ -426,16 +397,6 @@ def run_device_recycle_scan(
     for service in services:
         if not _is_retired_service(service, day_start_utc):
             continue
-        contact = _contact_by_duty(db, service.customer_id, DUTY_NETWORK_MAINTENANCE)
-        phone = (contact.phone or "").strip() if contact else ""
-        if contact is None or not phone:
-            logger.info(
-                "扫描 #%s：退网业务 %s 缺少%s或电话为空，跳过",
-                schedule.id,
-                service.service_number,
-                DUTY_NETWORK_MAINTENANCE,
-            )
-            continue
         for device in service.devices:
             if not device.is_active:
                 logger.info(
@@ -446,6 +407,15 @@ def run_device_recycle_scan(
                 continue
             if _device_recovered(device):
                 continue
+            phone = (device.maintenance_phone or "").strip()
+            if not phone:
+                logger.info(
+                    "扫描 #%s：退网业务 %s 缺少%s或电话为空，跳过",
+                    schedule.id,
+                    service.service_number,
+                    DUTY_NETWORK_MAINTENANCE,
+                )
+                continue
             if device.id in existing:
                 logger.info(
                     "扫描 #%s：设备 %s 当天已有回收任务，跳过",
@@ -454,25 +424,23 @@ def run_device_recycle_scan(
                 )
                 continue
             ctx = {
-                "客户名称": service.customer.name if service.customer else "",
+                "客户名称": service.customer_name,
                 "业务号码": service.service_number,
                 "协议到期日": (
                     _as_utc(service.agreement_expires_at).astimezone(zone).strftime("%Y-%m-%d")
                     if service.agreement_expires_at is not None
                     else ""
                 ),
-                "负责人姓名": (contact.name or "").strip(),
+                "负责人姓名": device.maintenance_name.strip(),
                 "设备编码": device.device_code,
                 "扫描类型": SCAN_TYPE_LABELS.get(schedule.scan_type, schedule.scan_type),
             }
             body = render_script_template(template, ctx)
             script = _make_scan_script(db, schedule, body, scan_date)
             task = CallTask(
-                plan=None,
                 scan_schedule=schedule,
-                customer_id=service.customer_id,
+                customer_name=service.customer_name,
                 script=script,
-                contact=contact,
                 dial_number=phone,
                 due_at=utcnow(),
                 status="queued",
@@ -542,7 +510,7 @@ def _change_set_business(db: Session, change_set: ChangeSet) -> BusinessService 
     """
 
     for item in change_set.items:
-        if item.entity_type != "BusinessService" or item.entity_id is None:
+        if item.entity_type.replace("_", "").lower() not in {"businessservice", "business"} or item.entity_id is None:
             continue
         service = db.get(BusinessService, item.entity_id)
         if service is not None:
@@ -604,7 +572,7 @@ def run_review_stuck_scan(
             continue
         for user in reviewers:
             ctx = {
-                "客户名称": service.customer.name if service.customer else "",
+                "客户名称": service.customer_name,
                 "业务号码": service.service_number,
                 "审核单标题": change_set.title,
                 "负责人姓名": (user.real_name or "").strip() or user.username,
@@ -613,11 +581,9 @@ def run_review_stuck_scan(
             body = render_script_template(template, ctx)
             script = _make_scan_script(db, schedule, body, scan_date)
             task = CallTask(
-                plan=None,
                 scan_schedule=schedule,
-                customer_id=service.customer_id,
+                customer_name=service.customer_name,
                 script=script,
-                contact=None,
                 dial_number=user.phone.strip(),
                 due_at=utcnow(),
                 status="queued",

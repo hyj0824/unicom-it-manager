@@ -67,8 +67,8 @@ def _provision_user(db: Session, name: str, phone: str, role_code: str) -> bool:
 def provision_users_from_business_payload(db: Session, payload: dict) -> int:
     """业务 payload：客户经理（contacts.account_manager）→ business_maintainer。"""
     manager = (payload.get("contacts") or {}).get("account_manager") or {}
-    name = str(manager.get("name", "")).strip()
-    phone = str(manager.get("phone", "")).strip()
+    name = str(payload.get("account_manager_name", manager.get("name", "")) or "").strip()
+    phone = str(payload.get("account_manager_phone", manager.get("phone", "")) or "").strip()
     if not phone:
         return 0
     return int(_provision_user(db, name, phone, "business_maintainer"))

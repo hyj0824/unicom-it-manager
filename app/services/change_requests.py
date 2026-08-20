@@ -70,23 +70,6 @@ def _format_date(value: datetime | None, timezone_name: str) -> str:
     return value.astimezone(get_zone(timezone_name)).strftime("%Y-%m-%d")
 
 
-def _contact_by_duty(service: BusinessService, duty: str) -> tuple[str, str]:
-    """取客户启用的指定职责联系人（名称、电话），优先有电话号码的一条。"""
-
-    links = [
-        link
-        for link in service.customer.contact_links
-        if link.is_active and link.duty == duty
-    ]
-    for link in links:
-        if (link.contact.phone or "").strip():
-            return (link.contact.name or "").strip(), link.contact.phone.strip()
-    if links:
-        link = links[0]
-        return (link.contact.name or "").strip(), (link.contact.phone or "").strip()
-    return "", ""
-
-
 def _dictionary_label_exists(db: Session, category: str, label: str) -> bool:
     """label 是否存在于启用的字典分类（与 reviews._item_id 的查找口径一致）。"""
 
@@ -127,15 +110,10 @@ def business_snapshot_patch(db: Session, service: BusinessService) -> dict:
     """
 
     settings = get_settings()
-    contacts: dict[str, dict[str, str]] = {}
-    for key, duty in (("developer", "发展人"), ("account_manager", "客户经理")):
-        name, phone = _contact_by_duty(service, duty)
-        if name or phone:
-            contacts[key] = {"name": name, "phone": phone}
     quality = _label(service.data_quality_status_item)
     return {
         "service_number": service.service_number,
-        "customer_name": service.customer.name if service.customer else "",
+        "customer_name": service.customer_name,
         "county": _label(service.county_item),
         "grid": _label(service.grid_item),
         "service_status": _label(service.service_status_item),
@@ -147,7 +125,10 @@ def business_snapshot_patch(db: Session, service: BusinessService) -> dict:
         ),
         # _apply_business 用 row_status 推导数据质量；快照保持当前值不变。
         "row_status": "missing" if quality == "缺项" else "valid",
-        "contacts": contacts,
+        "developer_name": service.developer_name,
+        "developer_phone": service.developer_phone,
+        "account_manager_name": service.account_manager_name,
+        "account_manager_phone": service.account_manager_phone,
     }
 
 
@@ -161,12 +142,9 @@ def device_snapshot_patch(db: Session, device: NetworkDevice) -> dict:
     service = device.business_service
     if service is None:
         raise ValueError(f"设备 {device.device_code} 未关联业务，不能提交回收申请。")
-    link = device.maintenance_contact
-    maintenance_name = link.contact.name if link and link.contact else ""
-    maintenance_phone = link.contact.phone if link and link.contact else ""
     return {
         "service_number": service.service_number,
-        "customer_name": service.customer.name if service.customer else "",
+        "customer_name": service.customer_name,
         "device": {
             "device_code": device.device_code,
             "asset_class": _label(device.asset_class_item),
@@ -179,8 +157,8 @@ def device_snapshot_patch(db: Session, device: NetworkDevice) -> dict:
             "recovery_status": RECOVERED_STATUS_LABEL,
             # 已回收后回收原因不再适用，按台账填写规则留空。
             "recovery_reason": "",
-            "maintenance_name": maintenance_name,
-            "maintenance_phone": maintenance_phone,
+            "maintenance_name": device.maintenance_name,
+            "maintenance_phone": device.maintenance_phone,
         },
     }
 
@@ -511,7 +489,7 @@ def list_due_renewal_rows(
     rows: list[dict] = []
     for service in window_services:
         expires_utc = _as_utc(service.agreement_expires_at)
-        account_manager, _ = _contact_by_duty(service, "客户经理")
+        account_manager = service.account_manager_name.strip()
         rows.append(
             {
                 "service": service,
@@ -557,12 +535,7 @@ def list_recycle_device_rows(
         for device in service.devices:
             if not device.is_active or scans._device_recovered(device):
                 continue
-            link = device.maintenance_contact
-            maintenance_name = (
-                link.contact.name if link and link.contact else ""
-            ).strip()
-            if not maintenance_name:
-                maintenance_name, _ = _contact_by_duty(service, "网络维护责任人")
+            maintenance_name = (device.maintenance_name or "").strip()
             rows.append(
                 {
                     "device": device,

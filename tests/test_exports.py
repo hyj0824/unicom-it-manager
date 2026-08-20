@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from app.main import build_ledger_export_workbook
-from app.models import BusinessService, Customer, NetworkDevice
+from app.models import BusinessService, NetworkDevice
 from app.services.imports import parse_ledger_rows
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,10 +22,7 @@ def test_flat_export_contains_instructions_and_remains_importable(tmp_path: Path
     command.upgrade(cfg, "head")
     engine = create_engine(url)
     db = Session(engine)
-    customer = Customer(name="测试客户")
-    db.add(customer)
-    db.flush()
-    service = BusinessService(service_number="848TEST0001", customer_id=customer.id)
+    service = BusinessService(service_number="848TEST0001", customer_name="测试客户")
     db.add(service)
     db.flush()
     db.add(NetworkDevice(device_code="DEV0001", business_service_id=service.id))

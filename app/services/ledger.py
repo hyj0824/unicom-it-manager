@@ -5,7 +5,8 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import AuditLog, BusinessService, Customer, CustomerContact, NetworkDevice
+from ..models import AuditLog, BusinessService, NetworkDevice
+from .plans import validate_phone
 from .plans import get_zone
 
 
@@ -64,13 +65,16 @@ def business_missing_fields(db: Session) -> list[dict[str, object]]:
         ("business_type_item_id", "业务类型"),
         ("agreement_expires_at", "协议到期时间"),
         ("accessed_at", "入网时间"),
+        ("customer_name", "客户名称"),
+        ("account_manager_name", "客户经理"),
+        ("account_manager_phone", "客户经理电话"),
     ]
     rows: list[dict[str, object]] = []
     for column, label in fields:
         count = db.scalar(
             select(func.count(BusinessService.id)).where(
                 BusinessService.is_active.is_(True),
-                getattr(BusinessService, column).is_(None),
+            (getattr(BusinessService, column).is_(None) if column.endswith("_at") else func.trim(getattr(BusinessService, column)) == ""),
             )
         ) or 0
         if count:
@@ -85,13 +89,15 @@ def device_missing_fields(db: Session) -> list[dict[str, object]]:
         ("asset_value", "资产价格"),
         ("location", "放置地点"),
         ("recovery_status_item_id", "回收状态"),
+        ("maintenance_name", "维护责任人"),
+        ("maintenance_phone", "维护责任人电话"),
     ]
     rows: list[dict[str, object]] = []
     for column, label in fields:
         count = db.scalar(
             select(func.count(NetworkDevice.id)).where(
                 NetworkDevice.is_active.is_(True),
-                getattr(NetworkDevice, column).is_(None),
+                (getattr(NetworkDevice, column).is_(None) if column.endswith("_id") or column == "asset_value" else func.trim(getattr(NetworkDevice, column)) == ""),
             )
         ) or 0
         if count:
@@ -99,41 +105,13 @@ def device_missing_fields(db: Session) -> list[dict[str, object]]:
     return rows
 
 
-def resolve_customer_by_name(db: Session, name: str) -> Customer:
-    """按名称解析客户主体：启用客户中不区分大小写精确匹配则复用，否则创建。
-
-    与导入应用链路的按名称创建语义一致（reviews._get_customer），手动录入
-    与导入不会产生重复客户主体；调用方在事务内负责提交/回滚。
-    """
-    label = " ".join(name.split())
-    if not label:
-        raise ValueError("客户名称不能为空。")
-    if len(label) > 120:
-        raise ValueError("客户名称不能超过 120 个字符。")
-    customer = db.scalars(
-        select(Customer)
-        .where(
-            Customer.is_active.is_(True),
-            func.lower(Customer.name) == label.casefold(),
-        )
-        .limit(1)
-    ).first()
-    if customer is not None:
-        return customer
-    customer = Customer(name=label)
-    db.add(customer)
-    db.flush()
-    return customer
-
-
-def contact_options(db: Session) -> list[CustomerContact]:
-    """设备维护责任人候选：所有有效客户-联系人关联。"""
-
-    return db.scalars(
-        select(CustomerContact)
-        .where(CustomerContact.is_active.is_(True))
-        .order_by(CustomerContact.id.asc())
-    ).all()
+def validate_customer_name(value: str) -> str | None:
+    value = " ".join(str(value or "").split())
+    if not value:
+        return "客户名称不能为空。"
+    if len(value) > 160:
+        return "客户名称不能超过 160 个字符。"
+    return None
 
 
 def parse_local_date(value: str, timezone_name: str) -> datetime | None:
