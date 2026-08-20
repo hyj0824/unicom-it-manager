@@ -1,71 +1,38 @@
 {% extends "base.html" %}
 {% block page_title %}话术管理{% endblock %}
 {% block content %}
-  <div class="grid form-list">
-    <section class="panel">
-      <div class="panel-head">
-        <h2>{{ "编辑话术" if edit_script else "新增话术" }}</h2>
-      </div>
-      {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
-      {% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
-      <form class="stack" method="post" action="{{ '/scripts/' ~ edit_script.id ~ '/edit' if edit_script else '/scripts' }}">
-        <label>
-          标题
-          <input name="title" value="{{ form_data.get('title', edit_script.title if edit_script else '') }}" required>
-        </label>
-        <label>
-          话术文本
-          <textarea name="body" rows="8" required>{{ form_data.get('body', edit_script.body if edit_script else '') }}</textarea>
-        </label>
-        <label>
-          本地 WAV 路径
-          <input name="wav_path" value="{{ form_data.get('wav_path', edit_script.wav_path if edit_script else '') }}" placeholder="/home/radxa/audio/callback.wav">
-        </label>
-        <div class="button-row">
-          <button class="button primary" type="submit">{{ "保存修改" if edit_script else "创建话术" }}</button>
-          {% if edit_script %}<a class="button ghost" href="/scripts">取消</a>{% endif %}
-        </div>
-      </form>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  {% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
+  {% set fd = form_data %}
+  <section class="panel scripts-page">
+    <div class="panel-head">
+      <div>
         <h2>话术列表</h2>
+        <span class="subtle">共 {{ scripts|length }} 条话术</span>
       </div>
-      <div class="table-wrap">
+      <button class="button primary" type="button" data-modal-open="scripts-modal" data-modal-title="新增话术">新增话术</button>
+    </div>
+    <div class="table-wrap">
       <table>
-        <thead>
-          <tr>
-            <th>标题</th>
-            <th>音频状态</th>
-            <th>WAV</th>
-            <th class="actions-col">操作</th>
-          </tr>
-        </thead>
+        <thead><tr><th>标题</th><th>音频状态</th><th>WAV</th><th class="actions-col">操作</th></tr></thead>
         <tbody>
           {% for script in scripts %}
             <tr>
               <td>{{ script.title }}</td>
               <td>
-                <span class="status-pill {{ script.tts_status }}">
-                  {{ "已生成" if script.tts_status == "generated" else ("未生成" if script.tts_status == "not_generated" else "生成失败") }}
-                </span>
+                <span class="status-pill {{ script.tts_status }}">{{ "已生成" if script.tts_status == "generated" else ("未生成" if script.tts_status == "not_generated" else "生成失败") }}</span>
                 {% if script.tts_error %}<div class="status-detail">{{ script.tts_error }}</div>{% endif %}
               </td>
               <td>
                 <div class="mono">{{ script.wav_path or "-" }}</div>
-                {% if script|script_audio_url %}
-                  <audio class="audio-preview" controls preload="none" src="{{ script|script_audio_url }}"></audio>
-                {% endif %}
+                {% if script|script_audio_url %}<audio class="audio-preview" controls preload="none" src="{{ script|script_audio_url }}"></audio>{% endif %}
               </td>
               <td class="actions">
-                <a class="button secondary small" href="/scripts?edit_id={{ script.id }}">编辑</a>
-                <form method="post" action="/scripts/{{ script.id }}/generate-audio">
-                  <button class="button secondary small" type="submit">生成音频</button>
-                </form>
-                <form method="post" action="/scripts/{{ script.id }}/delete" data-confirm="删除该话术？">
-                  <button class="button danger small" type="submit">删除</button>
-                </form>
+                <button class="button secondary small" type="button" data-modal-open="scripts-modal" data-modal-title="编辑话术"
+                        data-edit-action="/scripts/{{ script.id }}/edit"
+                        data-field-title="{{ script.title }}" data-field-body="{{ script.body }}" data-field-wav_path="{{ script.wav_path or '' }}">编辑</button>
+                <form method="post" action="/scripts/{{ script.id }}/generate-audio"><button class="button secondary small" type="submit">生成音频</button></form>
+                <form method="post" action="/scripts/{{ script.id }}/delete" data-confirm="删除该话术？"><button class="button danger small" type="submit">删除</button></form>
               </td>
             </tr>
           {% else %}
@@ -73,7 +40,19 @@
           {% endfor %}
         </tbody>
       </table>
-      </div>
+    </div>
+  </section>
+
+  <div class="modal" id="scripts-modal" role="dialog" aria-modal="true" aria-labelledby="scripts-modal-title"{% if edit_script %} data-modal-auto-open="true"{% endif %}>
+    <div class="modal-backdrop" data-modal-close></div>
+    <section class="modal-dialog">
+      <div class="panel-head"><h2 id="scripts-modal-title">{{ "编辑话术" if edit_script else "新增话术" }}</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
+      <form class="stack" method="post" action="{{ '/scripts/' ~ edit_script.id ~ '/edit' if edit_script else '/scripts' }}" data-modal-form data-default-action="/scripts">
+        <label>标题<input name="title" data-modal-field="title" value="{{ fd.get('title', edit_script.title if edit_script else '') }}" required></label>
+        <label>话术文本<textarea name="body" data-modal-field="body" rows="8" required>{{ fd.get('body', edit_script.body if edit_script else '') }}</textarea></label>
+        <label>本地 WAV 路径<input name="wav_path" data-modal-field="wav_path" value="{{ fd.get('wav_path', edit_script.wav_path if edit_script else '') }}" placeholder="/home/radxa/audio/callback.wav"></label>
+        <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
+      </form>
     </section>
   </div>
 {% endblock %}

@@ -526,9 +526,19 @@ def contacts_template(
 
 
 @app.get("/contacts")
-def contacts_page(request: Request, edit_id: int | None = None, db: Session = Depends(get_db)):
+def contacts_page(
+    request: Request,
+    edit_id: int | None = None,
+    error: str = "",
+    db: Session = Depends(get_db),
+):
     auth.require_login(request)
-    return contacts_template(request, db, edit_contact=db.get(Contact, edit_id) if edit_id else None)
+    return contacts_template(
+        request,
+        db,
+        edit_contact=db.get(Contact, edit_id) if edit_id else None,
+        error=error,
+    )
 
 
 @app.post("/contacts")
@@ -539,9 +549,9 @@ async def directory_contact_create(request: Request, db: Session = Depends(get_d
     phone = str(form.get("phone", "")).strip()
     duty = str(form.get("duty", "")).strip()
     if not name or not phone:
-        return contacts_template(request, db, "姓名和联系电话不能为空。", dict(form), status_code=400)
+        return redirect_to(f"/contacts?error={quote('姓名和联系电话不能为空。')}")
     if not plan_service.validate_phone(phone):
-        return contacts_template(request, db, "电话格式不正确（应为 +?[0-9]{5,20}）。", dict(form), status_code=400)
+        return redirect_to(f"/contacts?error={quote('电话格式不正确（应为 +?[0-9]{5,20}）。')}")
     db.add(Contact(name=name, phone=phone, duty=duty))
     db.commit()
     return redirect_to("/contacts")
@@ -555,11 +565,10 @@ async def contact_update(contact_id: int, request: Request, db: Session = Depend
     name = str(form.get("name", "")).strip()
     phone = str(form.get("phone", "")).strip()
     duty = str(form.get("duty", "")).strip()
-    form_data = {"name": name, "phone": phone, "duty": duty}
     if not name or not phone:
-        return contacts_template(request, db, "姓名和联系电话不能为空。", form_data, edit_contact=contact, status_code=400)
+        return redirect_to(f"/contacts?error={quote('姓名和联系电话不能为空。')}")
     if phone and not plan_service.validate_phone(phone):
-        return contacts_template(request, db, "电话格式不正确（应为 +?[0-9]{5,20}）。", form_data, edit_contact=contact, status_code=400)
+        return redirect_to(f"/contacts?error={quote('电话格式不正确（应为 +?[0-9]{5,20}）。')}")
     contact.name = name or None
     contact.phone = phone or None
     contact.duty = duty
@@ -1876,11 +1885,12 @@ def scripts_page(
     request: Request,
     edit_id: int | None = None,
     notice: str = "",
+    error: str = "",
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
     edit_script = db.get(Script, edit_id) if edit_id else None
-    return scripts_template(request, db, edit_script=edit_script, notice=notice)
+    return scripts_template(request, db, edit_script=edit_script, notice=notice, error=error)
 
 
 @app.post("/scripts")
@@ -1890,9 +1900,8 @@ async def script_create(request: Request, db: Session = Depends(get_db)):
     title = str(form.get("title", "")).strip()
     body = str(form.get("body", "")).strip()
     wav_path = str(form.get("wav_path", "")).strip()
-    form_data = {"title": title, "body": body, "wav_path": wav_path}
     if not title or not body:
-        return scripts_template(request, db, "标题和话术内容必填。", form_data, status_code=400)
+        return redirect_to(f"/scripts?error={quote('标题和话术内容必填。')}")
     # 手动指定 WAV 时视为已有可用音频；否则待生成。
     db.add(
         Script(
@@ -1915,7 +1924,7 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
     body = str(form.get("body", "")).strip()
     wav_path = str(form.get("wav_path", "")).strip()
     if not title or not body:
-        return scripts_template(request, db, "标题和话术内容必填。", edit_script=script, status_code=400)
+        return redirect_to(f"/scripts?error={quote('标题和话术内容必填。')}")
     script.title = title
     script.body = body
     script.wav_path = wav_path
@@ -2053,11 +2062,18 @@ def scan_schedules_page(
     request: Request,
     edit_id: int | None = None,
     notice: str = "",
+    error: str = "",
     db: Session = Depends(get_db),
 ):
     auth.require_login(request)
     edit_schedule = db.get(ScanSchedule, edit_id) if edit_id else None
-    return scan_schedules_template(request, db, edit_schedule=edit_schedule, notice=notice)
+    return scan_schedules_template(
+        request,
+        db,
+        edit_schedule=edit_schedule,
+        notice=notice,
+        error=error,
+    )
 
 
 @app.post("/scan-schedules")
@@ -2067,9 +2083,7 @@ async def scan_schedule_create(request: Request, db: Session = Depends(get_db)):
     try:
         data = _parse_scan_schedule_form(db, form)
     except ValueError as exc:
-        return scan_schedules_template(
-            request, db, str(exc), form_data=dict(form), status_code=400
-        )
+        return redirect_to(f"/scan-schedules?error={quote(str(exc))}")
     db.add(ScanSchedule(**data))
     db.commit()
     return redirect_to(f"/scan-schedules?notice={quote('扫描配置已创建。')}")
@@ -2083,14 +2097,12 @@ async def scan_schedule_update(schedule_id: int, request: Request, db: Session =
     try:
         data = _parse_scan_schedule_form(db, form)
     except ValueError as exc:
-        return scan_schedules_template(
-            request, db, str(exc), form_data=dict(form), edit_schedule=schedule, status_code=400
-        )
+        return redirect_to(f"/scan-schedules?error={quote(str(exc))}")
     for key, value in data.items():
         setattr(schedule, key, value)
     db.commit()
     notice = f"扫描配置「{schedule.name}」已保存。"
-    return redirect_to(f"/scan-schedules?edit_id={schedule.id}&notice={quote(notice)}")
+    return redirect_to(f"/scan-schedules?notice={quote(notice)}")
 
 
 @app.post("/scan-schedules/{schedule_id}/delete")

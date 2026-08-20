@@ -279,13 +279,15 @@ def test_login_redirects_and_pages_render(client: TestClient) -> None:
 
 def test_script_form_validation(client: TestClient) -> None:
     login(client)
-    resp = client.post("/scripts", data={"title": " ", "body": "内容"})
-    assert resp.status_code == 400
-    assert "标题和话术内容必填" in resp.text
+    resp = client.post("/scripts", data={"title": " ", "body": "内容"}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scripts?error=")
+    assert "标题和话术内容必填" in client.get(resp.headers["location"]).text
 
-    resp = client.post("/scripts", data={"title": "话术", "body": ""})
-    assert resp.status_code == 400
-    assert "标题和话术内容必填" in resp.text
+    resp = client.post("/scripts", data={"title": "话术", "body": ""}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scripts?error=")
+    assert "标题和话术内容必填" in client.get(resp.headers["location"]).text
 
     resp = client.post(
         "/scripts", data={"title": "回访话术", "body": "您好。"}, follow_redirects=False
@@ -297,13 +299,15 @@ def test_script_form_validation(client: TestClient) -> None:
 
 def test_contact_form_validation(client: TestClient) -> None:
     login(client)
-    resp = client.post("/contacts", data={"name": "", "phone": "13800000000"})
-    assert resp.status_code == 400
-    assert "姓名和联系电话不能为空" in resp.text
+    resp = client.post("/contacts", data={"name": "", "phone": "13800000000"}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/contacts?error=")
+    assert "姓名和联系电话不能为空" in client.get(resp.headers["location"]).text
 
-    resp = client.post("/contacts", data={"name": "张三", "phone": "123"})
-    assert resp.status_code == 400
-    assert "电话格式不正确" in resp.text
+    resp = client.post("/contacts", data={"name": "张三", "phone": "123"}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/contacts?error=")
+    assert "电话格式不正确" in client.get(resp.headers["location"]).text
 
     resp = client.post(
         "/contacts", data={"name": "张三", "phone": "13800000000"}, follow_redirects=False
@@ -315,45 +319,51 @@ def test_scan_schedule_form_validation(client: TestClient, webdb) -> None:
     login(client)
     ids = seed_basics(client, webdb, "客户丙")
 
-    # 名称为空 → 400。
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(ids, name=" "))
-    assert resp.status_code == 400
-    assert "名称不能为空" in resp.text
+    # 名称为空 → 列表页错误回显。
+    resp = client.post("/scan-schedules", data=_scan_schedule_data(ids, name=" "), follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "名称不能为空" in client.get(resp.headers["location"]).text
 
-    # 无效 scan_type → 400。
+    # 无效 scan_type → 列表页错误回显。
     resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, scan_type="monthly")
+        "/scan-schedules", data=_scan_schedule_data(ids, scan_type="monthly"), follow_redirects=False
     )
-    assert resp.status_code == 400
-    assert "扫描类型无效" in resp.text
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "扫描类型无效" in client.get(resp.headers["location"]).text
 
-    # 无效 cron 表达式 → 400，提示明确。
+    # 无效 cron 表达式 → 列表页错误回显，提示明确。
     resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, cron_expr="not a cron")
+        "/scan-schedules", data=_scan_schedule_data(ids, cron_expr="not a cron"), follow_redirects=False
     )
-    assert resp.status_code == 400
-    assert "Cron 表达式「not a cron」无效" in resp.text
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "Cron 表达式「not a cron」无效" in client.get(resp.headers["location"]).text
 
-    # 无效时区 → 400。
+    # 无效时区 → 列表页错误回显。
     resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, timezone="Mars/Olympus")
+        "/scan-schedules", data=_scan_schedule_data(ids, timezone="Mars/Olympus"), follow_redirects=False
     )
-    assert resp.status_code == 400
-    assert "时区「Mars/Olympus」无效" in resp.text
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "时区「Mars/Olympus」无效" in client.get(resp.headers["location"]).text
 
-    # 提前天数非法 → 400。
+    # 提前天数非法 → 列表页错误回显。
     resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, lead_days="abc")
+        "/scan-schedules", data=_scan_schedule_data(ids, lead_days="abc"), follow_redirects=False
     )
-    assert resp.status_code == 400
-    assert "提前天数必须是整数" in resp.text
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "提前天数必须是整数" in client.get(resp.headers["location"]).text
 
-    # 不存在的 script_id → 400。
+    # 不存在的 script_id → 列表页错误回显。
     resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, script_id="999999")
+        "/scan-schedules", data=_scan_schedule_data(ids, script_id="999999"), follow_redirects=False
     )
-    assert resp.status_code == 400
-    assert "话术模板不存在" in resp.text
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "话术模板不存在" in client.get(resp.headers["location"]).text
 
 
 def test_scan_schedule_valid_submission_edit_toggle_delete(client: TestClient, webdb) -> None:
