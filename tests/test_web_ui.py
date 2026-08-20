@@ -333,10 +333,13 @@ def test_scan_schedule_create_rejects_invalid_cron_with_clear_message(client: Te
     resp = client.post(
         "/scan-schedules",
         data=_scan_schedule_data(cron_expr="0 9 * *"),
+        follow_redirects=False,
     )
-    assert resp.status_code == 400
-    assert "Cron 表达式" in resp.text
-    assert "无效" in resp.text
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    page = client.get(resp.headers["location"])
+    assert "Cron 表达式" in page.text
+    assert "无效" in page.text
 
 
 def test_scan_schedule_create_rejects_invalid_timezone(client: TestClient) -> None:
@@ -344,31 +347,37 @@ def test_scan_schedule_create_rejects_invalid_timezone(client: TestClient) -> No
     resp = client.post(
         "/scan-schedules",
         data=_scan_schedule_data(timezone_name="Mars/Olympus"),
+        follow_redirects=False,
     )
-    assert resp.status_code == 400
-    assert "时区「Mars/Olympus」无效" in resp.text
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "时区「Mars/Olympus」无效" in client.get(resp.headers["location"]).text
 
 
 def test_scan_schedule_create_rejects_missing_name_and_bad_type(client: TestClient) -> None:
     login(client)
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(name=" "))
-    assert resp.status_code == 400
-    assert "名称不能为空" in resp.text
+    resp = client.post("/scan-schedules", data=_scan_schedule_data(name=" "), follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "名称不能为空" in client.get(resp.headers["location"]).text
 
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(scan_type="monthly"))
-    assert resp.status_code == 400
-    assert "扫描类型无效" in resp.text
+    resp = client.post("/scan-schedules", data=_scan_schedule_data(scan_type="monthly"), follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "扫描类型无效" in client.get(resp.headers["location"]).text
 
 
 def test_scan_schedule_create_rejects_bad_lead_days(client: TestClient) -> None:
     login(client)
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(lead_days="abc"))
-    assert resp.status_code == 400
-    assert "提前天数必须是整数" in resp.text
+    resp = client.post("/scan-schedules", data=_scan_schedule_data(lead_days="abc"), follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "提前天数必须是整数" in client.get(resp.headers["location"]).text
 
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(lead_days="-3"))
-    assert resp.status_code == 400
-    assert "提前天数不能为负数" in resp.text
+    resp = client.post("/scan-schedules", data=_scan_schedule_data(lead_days="-3"), follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "提前天数不能为负数" in client.get(resp.headers["location"]).text
 
 
 def test_scan_schedule_create_valid_shows_in_list(client: TestClient) -> None:
@@ -455,9 +464,11 @@ def test_scan_schedule_edit_rejects_invalid_cron(client: TestClient) -> None:
     resp = client.post(
         f"/scan-schedules/{schedule.id}/edit",
         data=_scan_schedule_data(cron_expr="not a cron"),
+        follow_redirects=False,
     )
-    assert resp.status_code == 400
-    assert "Cron 表达式" in resp.text
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/scan-schedules?error=")
+    assert "Cron 表达式" in client.get(resp.headers["location"]).text
     with SessionLocal() as session:
         assert session.get(ScanSchedule, schedule.id).cron_expr == "0 9 * * *"
 
@@ -519,6 +530,70 @@ def test_scan_schedule_edit_form_prefills_current_values(client: TestClient) -> 
     assert "编辑扫描配置" in resp.text
     assert "已存在的扫描" in resp.text
     assert "30 8 * * *" in resp.text
+
+
+def test_contacts_scripts_and_scan_schedules_use_modal_lookup_forms(client: TestClient) -> None:
+    login(client)
+    contact = client.post(
+        "/contacts",
+        data={"name": "张三", "phone": "13800000000", "duty": "客户经理"},
+        follow_redirects=False,
+    )
+    assert contact.status_code == 303
+    script = make_script("弹窗话术")
+    schedule = make_scan_schedule(script=script, enabled=False, sms_enabled=True)
+
+    contacts_page = client.get("/contacts")
+    assert contacts_page.status_code == 200
+    assert 'data-modal-open="contacts-modal"' in contacts_page.text
+    assert 'data-modal-form data-default-action="/contacts"' in contacts_page.text
+    assert 'list="contact-duty-options"' in contacts_page.text
+    assert 'name="duty"' in contacts_page.text
+    assert 'data-edit-action="/contacts/' in contacts_page.text
+    assert 'data-field-duty="客户经理"' in contacts_page.text
+
+    scripts_page = client.get("/scripts")
+    assert scripts_page.status_code == 200
+    assert 'data-modal-open="scripts-modal"' in scripts_page.text
+    assert 'data-modal-form data-default-action="/scripts"' in scripts_page.text
+    assert 'data-edit-action="/scripts/' in scripts_page.text
+    assert 'data-field-body="正文内容"' in scripts_page.text
+    assert f'action="/scripts/{script.id}/generate-audio"' in scripts_page.text
+
+    schedules_page = client.get("/scan-schedules")
+    assert schedules_page.status_code == 200
+    assert 'data-modal-open="scan-schedules-modal"' in schedules_page.text
+    assert 'data-modal-form data-default-action="/scan-schedules"' in schedules_page.text
+    assert 'list="scan-type-options"' in schedules_page.text
+    assert 'id="scan-type-id" name="scan_type"' in schedules_page.text
+    assert 'list="script-options"' in schedules_page.text
+    assert 'id="scan-script-id" name="script_id"' in schedules_page.text
+    assert 'list="timezone-options"' in schedules_page.text
+    assert f'data-edit-action="/scan-schedules/{schedule.id}/edit"' in schedules_page.text
+    assert 'data-field-enabled="0"' in schedules_page.text
+    assert 'data-field-sms_enabled="1"' in schedules_page.text
+
+
+def test_contacts_and_scripts_validation_errors_redirect_to_list(client: TestClient) -> None:
+    login(client)
+
+    contact_resp = client.post(
+        "/contacts",
+        data={"name": "", "phone": "13800000000"},
+        follow_redirects=False,
+    )
+    assert contact_resp.status_code == 303
+    assert contact_resp.headers["location"].startswith("/contacts?error=")
+    assert "姓名和联系电话不能为空" in client.get(contact_resp.headers["location"]).text
+
+    script_resp = client.post(
+        "/scripts",
+        data={"title": "", "body": "正文"},
+        follow_redirects=False,
+    )
+    assert script_resp.status_code == 303
+    assert script_resp.headers["location"].startswith("/scripts?error=")
+    assert "标题和话术内容必填" in client.get(script_resp.headers["location"]).text
 
 
 def test_scan_schedule_list_shows_last_run_and_error(client: TestClient) -> None:

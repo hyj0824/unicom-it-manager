@@ -24,7 +24,12 @@
       modal.querySelectorAll("[data-modal-field]").forEach((field) => {
         const key = field.dataset.modalField;
         const value = trigger.getAttribute(`data-field-${key}`);
-        if (value !== null) field.value = value;
+        if (value === null) return;
+        if (field.type === "checkbox") {
+          field.checked = ["1", "true", "on", "yes"].includes(value.toLowerCase());
+        } else {
+          field.value = value;
+        }
       });
     }
     modal.classList.add("is-open");

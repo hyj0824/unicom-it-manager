@@ -1,92 +1,26 @@
 {% extends "base.html" %}
 {% block page_title %}扫描通知{% endblock %}
 {% block content %}
-  <div class="grid form-list">
-    <section class="panel">
-      <div class="panel-head">
-        <h2>{{ "编辑扫描配置" if edit_schedule else "新增扫描配置" }}</h2>
-      </div>
-      {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
-      {% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
-      {% set selected_type = form_data.get('scan_type', edit_schedule.scan_type if edit_schedule else 'due_renewal') %}
-      {% set selected_script = form_data.get('script_id', edit_schedule.script_id if edit_schedule and edit_schedule.script_id else '') %}
-      {% set selected_timezone = form_data.get('timezone', edit_schedule.timezone if edit_schedule else settings.default_timezone) %}
-      {% set selected_lead_days = form_data.get('lead_days', edit_schedule.lead_days if edit_schedule else 14) %}
-      {% set enabled_checked = (form_data and form_data.get('enabled') == 'on') or ((not form_data) and (not edit_schedule or edit_schedule.enabled)) %}
-      {% set sms_checked = (form_data and form_data.get('sms_enabled') == 'on') or ((not form_data) and (edit_schedule and edit_schedule.sms_enabled)) %}
-      <form class="stack" method="post" action="{{ '/scan-schedules/' ~ edit_schedule.id ~ '/edit' if edit_schedule else '/scan-schedules' }}">
-        <label>
-          配置名称
-          <input name="name" value="{{ form_data.get('name', edit_schedule.name if edit_schedule else '') }}" placeholder="例如：每日到期维系扫描" required>
-        </label>
-        <label>
-          扫描类型
-          <select name="scan_type" required>
-            <option value="due_renewal" {% if selected_type == 'due_renewal' %}selected{% endif %}>到期维系（通知客户经理）</option>
-            <option value="device_recycle" {% if selected_type == 'device_recycle' %}selected{% endif %}>设备回收（通知网络维护责任人）</option>
-            <option value="review_stuck" {% if selected_type == 'review_stuck' %}selected{% endif %}>审核卡单提醒（通知审核人员）</option>
-          </select>
-          <span class="subtle">审核卡单提醒不使用提前天数，该类型无需设置「提前天数」。</span>
-        </label>
-        <label>
-          话术模板
-          <select name="script_id">
-            <option value="">不指定（使用内置默认模板）</option>
-            {% for script in scripts %}
-              <option value="{{ script.id }}" {% if selected_script|string == script.id|string %}selected{% endif %}>{{ script.title }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>
-          执行时段（Cron 表达式）
-          <input name="cron_expr" value="{{ form_data.get('cron_expr', edit_schedule.cron_expr if edit_schedule else '0 9 * * *') }}" placeholder="0 9 * * *">
-          <span class="subtle">示例：0 9 * * * 每天 09:00 · 0 9 * * mon-fri 工作日 09:00 · 30 8 * * * 每天 08:30</span>
-        </label>
-        <label>
-          时区
-          <input name="timezone" value="{{ selected_timezone }}">
-          <span class="subtle">IANA 时区名，例如 Asia/Shanghai；调度按此时区判断执行时段。</span>
-        </label>
-        <label>
-          提前天数
-          <input type="number" name="lead_days" min="0" step="1" value="{{ selected_lead_days }}">
-          <span class="subtle">到期前 N 天开始纳入扫描通知范围（默认 14）；仅到期维系 / 设备回收使用。</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" name="enabled" {% if enabled_checked %}checked{% endif %}>
-          启用
-        </label>
-        <label class="check">
-          <input type="checkbox" name="sms_enabled" {% if sms_checked %}checked{% endif %}>
-          同步短信通知
-          <span class="subtle">生成语音通知任务时同步入队短信，由 Worker 空闲时发送（需 .env 设置 SMS_ENABLED=1）。</span>
-        </label>
-        <div class="button-row">
-          <button class="button primary" type="submit">{{ "保存修改" if edit_schedule else "创建配置" }}</button>
-          {% if edit_schedule %}<a class="button ghost" href="/scan-schedules">取消</a>{% endif %}
-        </div>
-      </form>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  {% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
+  {% set fd = form_data %}
+  {% set selected_type = fd.get('scan_type', edit_schedule.scan_type if edit_schedule else 'due_renewal') %}
+  {% set selected_script = fd.get('script_id', edit_schedule.script_id if edit_schedule and edit_schedule.script_id else '') %}
+  {% set selected_timezone = fd.get('timezone', edit_schedule.timezone if edit_schedule else settings.default_timezone) %}
+  {% set selected_lead_days = fd.get('lead_days', edit_schedule.lead_days if edit_schedule else 14) %}
+  {% set enabled_checked = (fd and fd.get('enabled') == 'on') or ((not fd) and (not edit_schedule or edit_schedule.enabled)) %}
+  {% set sms_checked = (fd and fd.get('sms_enabled') == 'on') or ((not fd) and (edit_schedule and edit_schedule.sms_enabled)) %}
+  <section class="panel scan-schedules-page">
+    <div class="panel-head">
+      <div>
         <h2>扫描配置列表</h2>
+        <span class="subtle">共 {{ schedules|length }} 条配置</span>
       </div>
-      <div class="table-wrap">
+      <button class="button primary" type="button" data-modal-open="scan-schedules-modal" data-modal-title="新增扫描配置">新增配置</button>
+    </div>
+    <div class="table-wrap">
       <table>
-        <thead>
-          <tr>
-            <th>名称</th>
-            <th>类型</th>
-            <th>话术模板</th>
-            <th>执行时段</th>
-            <th>提前天数</th>
-            <th>状态</th>
-            <th>短信</th>
-            <th>上次运行 / 错误</th>
-            <th class="actions-col">操作</th>
-          </tr>
-        </thead>
+        <thead><tr><th>名称</th><th>类型</th><th>话术模板</th><th>执行时段</th><th>提前天数</th><th>状态</th><th>短信</th><th>上次运行 / 错误</th><th class="actions-col">操作</th></tr></thead>
         <tbody>
           {% for schedule in schedules %}
             <tr>
@@ -97,18 +31,20 @@
               <td>{{ schedule.lead_days }} 天</td>
               <td><span class="status-pill {{ 'ok' if schedule.enabled else 'muted' }}">{{ "启用" if schedule.enabled else "停用" }}</span></td>
               <td><span class="status-pill {{ 'ok' if schedule.sms_enabled else 'muted' }}">{{ "同步" if schedule.sms_enabled else "关闭" }}</span></td>
-              <td>
-                <div class="mono">{{ schedule.last_run_at|dt(schedule.timezone) if schedule.last_run_at else "-" }}</div>
-                {% if schedule.last_error %}<div class="status-detail error">{{ schedule.last_error }}</div>{% endif %}
-              </td>
+              <td><div class="mono">{{ schedule.last_run_at|dt(schedule.timezone) if schedule.last_run_at else "-" }}</div>{% if schedule.last_error %}<div class="status-detail error">{{ schedule.last_error }}</div>{% endif %}</td>
               <td class="actions">
-                <a class="button secondary small" href="/scan-schedules?edit_id={{ schedule.id }}">编辑</a>
-                <form method="post" action="/scan-schedules/{{ schedule.id }}/toggle">
-                  <button class="button secondary small" type="submit">{{ "停用" if schedule.enabled else "启用" }}</button>
-                </form>
-                <form method="post" action="/scan-schedules/{{ schedule.id }}/delete" data-confirm="删除扫描配置「{{ schedule.name }}」？已生成的通知任务会阻止删除。">
-                  <button class="button danger small" type="submit">删除</button>
-                </form>
+                <button class="button secondary small" type="button" data-modal-open="scan-schedules-modal" data-modal-title="编辑扫描配置"
+                        data-edit-action="/scan-schedules/{{ schedule.id }}/edit"
+                        data-field-name="{{ schedule.name }}"
+                        data-field-scan_type_search="{{ '到期维系' if schedule.scan_type == 'due_renewal' else ('设备回收' if schedule.scan_type == 'device_recycle' else '审核卡单') }}"
+                        data-field-scan_type="{{ schedule.scan_type }}"
+                        data-field-script_search="{{ schedule.script.title if schedule.script else '' }}"
+                        data-field-script_id="{{ schedule.script_id or '' }}"
+                        data-field-cron_expr="{{ schedule.cron_expr }}" data-field-timezone="{{ schedule.timezone }}"
+                        data-field-lead_days="{{ schedule.lead_days }}" data-field-enabled="{{ '1' if schedule.enabled else '0' }}"
+                        data-field-sms_enabled="{{ '1' if schedule.sms_enabled else '0' }}">编辑</button>
+                <form method="post" action="/scan-schedules/{{ schedule.id }}/toggle"><button class="button secondary small" type="submit">{{ "停用" if schedule.enabled else "启用" }}</button></form>
+                <form method="post" action="/scan-schedules/{{ schedule.id }}/delete" data-confirm="删除扫描配置「{{ schedule.name }}」？已生成的通知任务会阻止删除。"><button class="button danger small" type="submit">删除</button></form>
               </td>
             </tr>
           {% else %}
@@ -116,10 +52,43 @@
           {% endfor %}
         </tbody>
       </table>
-      </div>
-      <div class="panel-foot">
-        <span class="subtle">调度器每分钟检查一次各配置的执行时段，匹配时自动生成通知任务（到期维系 / 设备回收 / 审核卡单提醒），不直接拨号。</span>
-      </div>
+    </div>
+    <div class="panel-foot"><span class="subtle">调度器每分钟检查一次各配置的执行时段，匹配时自动生成通知任务，不直接拨号。</span></div>
+  </section>
+
+  <datalist id="scan-type-options">
+    <option value="到期维系" data-id="due_renewal"></option>
+    <option value="设备回收" data-id="device_recycle"></option>
+    <option value="审核卡单" data-id="review_stuck"></option>
+  </datalist>
+  <datalist id="script-options">{% for script in scripts %}<option value="{{ script.title }}" data-id="{{ script.id }}"></option>{% endfor %}</datalist>
+  <datalist id="timezone-options">
+    <option value="Asia/Shanghai"></option><option value="UTC"></option><option value="Asia/Hong_Kong"></option>
+    <option value="Asia/Tokyo"></option><option value="Europe/London"></option><option value="America/New_York"></option>
+  </datalist>
+
+  <div class="modal" id="scan-schedules-modal" role="dialog" aria-modal="true" aria-labelledby="scan-schedules-modal-title"{% if edit_schedule %} data-modal-auto-open="true"{% endif %}>
+    <div class="modal-backdrop" data-modal-close></div>
+    <section class="modal-dialog">
+      <div class="panel-head"><h2 id="scan-schedules-modal-title">{{ "编辑扫描配置" if edit_schedule else "新增扫描配置" }}</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
+      <form class="stack" method="post" action="{{ '/scan-schedules/' ~ edit_schedule.id ~ '/edit' if edit_schedule else '/scan-schedules' }}" data-modal-form data-default-action="/scan-schedules">
+        <label>配置名称<input name="name" data-modal-field="name" value="{{ fd.get('name', edit_schedule.name if edit_schedule else '') }}" placeholder="例如：每日到期维系扫描" required></label>
+        <label>扫描类型
+          <input list="scan-type-options" data-modal-field="scan_type_search" data-lookup-target="scan-type-id" value="{{ '到期维系' if selected_type == 'due_renewal' else ('设备回收' if selected_type == 'device_recycle' else '审核卡单') }}" autocomplete="off" placeholder="输入或搜索扫描类型" required>
+          <input type="hidden" id="scan-type-id" name="scan_type" data-modal-field="scan_type" value="{{ selected_type }}">
+          <span class="subtle">到期维系、设备回收、审核卡单三选一。</span>
+        </label>
+        <label>话术模板
+          <input list="script-options" data-modal-field="script_search" data-lookup-target="scan-script-id" value="{{ edit_schedule.script.title if edit_schedule and edit_schedule.script and not fd else '' }}" autocomplete="off" placeholder="输入或搜索话术标题">
+          <input type="hidden" id="scan-script-id" name="script_id" data-modal-field="script_id" value="{{ selected_script }}">
+        </label>
+        <label>执行时段（Cron 表达式）<input name="cron_expr" data-modal-field="cron_expr" value="{{ fd.get('cron_expr', edit_schedule.cron_expr if edit_schedule else '0 9 * * *') }}" placeholder="0 9 * * *"><span class="subtle">示例：0 9 * * * 每天 09:00 · 0 9 * * mon-fri 工作日 09:00。</span></label>
+        <label>时区<input name="timezone" data-modal-field="timezone" list="timezone-options" value="{{ selected_timezone }}" autocomplete="off" placeholder="Asia/Shanghai"><span class="subtle">IANA 时区名，调度按此时区判断执行时段。</span></label>
+        <label>提前天数<input type="number" name="lead_days" data-modal-field="lead_days" min="0" step="1" value="{{ selected_lead_days }}"><span class="subtle">到期前 N 天纳入扫描范围；审核卡单提醒不使用提前天数。</span></label>
+        <label class="check"><input type="checkbox" name="enabled" data-modal-field="enabled"{% if enabled_checked %} checked{% endif %}>启用</label>
+        <label class="check"><input type="checkbox" name="sms_enabled" data-modal-field="sms_enabled"{% if sms_checked %} checked{% endif %}>同步短信通知<span class="subtle">需 .env 设置 SMS_ENABLED=1。</span></label>
+        <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
+      </form>
     </section>
   </div>
 {% endblock %}
