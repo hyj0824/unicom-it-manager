@@ -912,6 +912,8 @@ def test_daily_operations_pages_and_existing_submit_routes(client: TestClient) -
     assert "今天起 21 天内" in renew_page.text
     assert "DAILY-RENEW-001" in renew_page.text
     assert "DAILY-DEVICE-001" not in renew_page.text
+    # 无设备业务：退网提示不会进入回收提醒；有设备业务在回收页可见。
+    assert "该业务下没有设备，退网后不会进入回收提醒。" in renew_page.text
     assert f'/due-work/business/{due_service_id}/renew' in renew_page.text
     assert f'/due-work/business/{due_service_id}/retire' in renew_page.text
 
@@ -1102,6 +1104,40 @@ def test_ledger_creates_or_reuses_customer_by_name(client: TestClient) -> None:
     )
     assert resp.status_code == 303
     assert "必须输入客户名称" in client.get(resp.headers["location"]).text
+
+
+def test_ledger_device_column_links_to_filtered_devices(client: TestClient) -> None:
+    """业务台账「设备」列显示有效设备数并跳转设备页按业务筛选。"""
+    login(client)
+    customer = make_customer("设备列客户")
+    with SessionLocal() as session:
+        service = BusinessService(service_number="LEDGER-DEV-001", customer_id=customer.id)
+        other = BusinessService(service_number="LEDGER-OTHER-001", customer_id=customer.id)
+        session.add_all([service, other])
+        session.flush()
+        session.add_all(
+            [
+                NetworkDevice(device_code="LEDGER-DEVICE-1", business_service_id=service.id),
+                NetworkDevice(device_code="LEDGER-DEVICE-2", business_service_id=service.id),
+                NetworkDevice(device_code="LEDGER-OTHER-DEV", business_service_id=other.id),
+            ]
+        )
+        session.commit()
+        service_id = service.id
+        other_id = other.id
+
+    page = client.get("/ledger", params={"q": "LEDGER-DEV"})
+    assert "2 台" in page.text
+    assert f'href="/devices?business_id={service_id}"' in page.text
+
+    filtered = client.get("/devices", params={"business_id": service_id})
+    assert "LEDGER-DEVICE-1" in filtered.text
+    assert "LEDGER-DEVICE-2" in filtered.text
+    assert "LEDGER-OTHER-DEV" not in filtered.text
+
+    other_filtered = client.get("/devices", params={"business_id": other_id})
+    assert "LEDGER-OTHER-DEV" in other_filtered.text
+    assert "LEDGER-DEVICE-1" not in other_filtered.text
 
 
 def test_devices_reject_nonexistent_business_id(client: TestClient) -> None:

@@ -36,7 +36,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>业务号码</th><th>客户名称</th><th>县分</th><th>网格</th><th>服务状态</th><th>业务类型</th><th>入网时间</th><th>协议到期时间</th><th class="actions-col">操作</th></tr>
+          <tr><th>业务号码</th><th>客户名称</th><th>县分</th><th>网格</th><th>服务状态</th><th>业务类型</th><th>入网时间</th><th>协议到期时间</th><th>设备</th><th class="actions-col">操作</th></tr>
         </thead>
         <tbody>
           {% for service in services %}
@@ -49,6 +49,7 @@
               <td>{{ service.business_type_item.label if service.business_type_item else "-" }}</td>
               <td>{{ service.accessed_at|date or "-" }}</td>
               <td>{{ service.agreement_expires_at|date or "-" }}</td>
+              <td><a class="text-link" href="/devices?business_id={{ service.id }}">{{ device_counts.get(service.id, 0) }} 台</a></td>
               <td class="actions">{% if can('submit', 'business') %}
                 <button class="button secondary small" type="button" data-modal-open="ledger-modal" data-modal-title="编辑业务" data-edit-action="/ledger/{{ service.id }}/edit"
                         data-field-service_number="{{ service.service_number }}" data-field-customer_name="{{ service.customer.name }}"
@@ -61,7 +62,7 @@
               {% endif %}</td>
             </tr>
           {% else %}
-            <tr><td colspan="9" class="empty">暂无业务记录。</td></tr>
+            <tr><td colspan="10" class="empty">暂无业务记录。</td></tr>
           {% endfor %}
         </tbody>
       </table>

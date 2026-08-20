@@ -14,6 +14,10 @@
         <input list="recovery-status-options" value="{% for item in recovery_statuses %}{% if item.id == recovery_status_id %}{{ item.label }}{% endif %}{% endfor %}" data-lookup-target="device-filter-recovery-id" autocomplete="off" placeholder="全部状态">
         <input type="hidden" id="device-filter-recovery-id" name="recovery_status_id" value="{{ recovery_status_id or '' }}">
       </label>
+      <label class="filter-field">所属业务
+        <input list="device-business-options" value="{% for item in services %}{% if item.id == business_id %}{{ item.service_number }}{% endif %}{% endfor %}" data-lookup-target="device-filter-business-id" autocomplete="off" placeholder="全部业务">
+        <input type="hidden" id="device-filter-business-id" name="business_id" value="{{ business_id or '' }}">
+      </label>
       <button class="button secondary" type="submit">筛选</button><a class="button ghost" href="/devices">重置</a>
     </form>
     <div class="table-wrap">
@@ -53,6 +57,7 @@
   <datalist id="asset-class-options">{% for item in asset_classes %}<option value="{{ item.label }}"></option>{% endfor %}</datalist>
   <datalist id="device-type-options">{% for item in device_types %}<option value="{{ item.label }}"></option>{% endfor %}</datalist>
   <datalist id="recovery-status-options">{% for item in recovery_statuses %}<option value="{{ item.label }}" data-id="{{ item.id }}"></option>{% endfor %}</datalist>
+  <datalist id="device-business-options">{% for item in services %}<option value="{{ item.service_number }}" data-id="{{ item.id }}"></option>{% endfor %}</datalist>
   <datalist id="recovery-reason-options">{% for item in recovery_reasons %}<option value="{{ item.label }}"></option>{% endfor %}</datalist>
   <datalist id="maintenance-contact-options">{% for link in maintenance_contacts %}<option value="{{ link.contact.name or '-' }} - {{ link.customer.name }}{% if link.contact.phone %} ({{ link.contact.phone }}){% endif %}" data-id="{{ link.id }}"></option>{% endfor %}</datalist>
 

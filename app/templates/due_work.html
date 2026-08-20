@@ -57,6 +57,7 @@
               <details class="row-form">
                 <summary class="button danger small">退网申请</summary>
                 <form class="row-form-body" method="post" action="/due-work/business/{{ row.service.id }}/retire" data-confirm="确认提交退网申请？审核应用后该业务服务状态将改为「主动退网(申请拆机)」，其设备将进入回收提醒。">
+                  {% if row.device_count > 0 %}<p class="subtle">该业务下 {{ row.device_count }} 台设备将进入回收提醒。</p>{% else %}<p class="subtle">该业务下没有设备，退网后不会进入回收提醒。</p>{% endif %}
                   <label>申请理由<input name="reason" required placeholder="例如：客户确认不续签，申请拆机"></label>
                   <button class="button danger small" type="submit">提交退网申请</button>
                 </form>

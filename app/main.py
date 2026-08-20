@@ -632,6 +632,17 @@ def ledger_template(
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
+    # 每业务有效设备数（列表「设备」列；点击跳转设备页按业务筛选）。
+    device_counts = dict(
+        db.execute(
+            select(NetworkDevice.business_service_id, func.count(NetworkDevice.id))
+            .where(
+                NetworkDevice.business_service_id.in_([s.id for s in services]),
+                NetworkDevice.is_active.is_(True),
+            )
+            .group_by(NetworkDevice.business_service_id)
+        ).all()
+    )
     customers = db.scalars(select(Customer).order_by(Customer.name.asc())).all()
     return render(
         request,
@@ -639,6 +650,7 @@ def ledger_template(
         db,
         status_code=status_code,
         services=services,
+        device_counts=device_counts,
         customers=customers,
         counties=active_items(db, "county"),
         grids=active_items(db, "grid"),
@@ -796,6 +808,7 @@ def devices_template(
     status_code: int = 200,
     q: str = "",
     recovery_status_id: int | None = None,
+    business_id: int | None = None,
     page: int = 1,
 ):
     query = select(NetworkDevice).where(NetworkDevice.is_active.is_(True))
@@ -806,6 +819,8 @@ def devices_template(
         )
     if recovery_status_id:
         query = query.where(NetworkDevice.recovery_status_item_id == recovery_status_id)
+    if business_id:
+        query = query.where(NetworkDevice.business_service_id == business_id)
     total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     page_size = 50
     last_page = max(1, (total + page_size - 1) // page_size)
@@ -836,6 +851,7 @@ def devices_template(
         form_data=form_data or {},
         q=q,
         recovery_status_id=recovery_status_id or 0,
+        business_id=business_id or 0,
         page=page,
         total=total,
         last_page=last_page,
@@ -849,6 +865,7 @@ def devices_page(
     edit_id: int | None = None,
     q: str = "",
     recovery_status_id: int | None = None,
+    business_id: int | None = None,
     page: int = 1,
     error: str = "",
     db: Session = Depends(get_db),
@@ -857,7 +874,7 @@ def devices_page(
     edit_device = db.get(NetworkDevice, edit_id) if edit_id else None
     return devices_template(
         request, db, edit_device=edit_device, q=q, recovery_status_id=recovery_status_id,
-        page=page, error=error,
+        business_id=business_id, page=page, error=error,
     )
 
 

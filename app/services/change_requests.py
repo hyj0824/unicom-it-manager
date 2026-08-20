@@ -497,6 +497,17 @@ def list_due_renewal_rows(
     notify_counts = _notification_count_map(
         db, scans.SOURCE_DUE_RENEWAL, "business_service_id", service_ids
     )
+    # 每业务有效设备数（退网申请提示用；无设备不会进入回收提醒）。
+    device_counts = dict(
+        db.execute(
+            select(NetworkDevice.business_service_id, func.count(NetworkDevice.id))
+            .where(
+                NetworkDevice.business_service_id.in_(service_ids),
+                NetworkDevice.is_active.is_(True),
+            )
+            .group_by(NetworkDevice.business_service_id)
+        ).all()
+    )
     rows: list[dict] = []
     for service in window_services:
         expires_utc = _as_utc(service.agreement_expires_at)
@@ -513,6 +524,8 @@ def list_due_renewal_rows(
                 "pending": pending.get(service.id),
                 # 已退网业务：隐藏续签 / 退网按钮（回收入口在设备表）。
                 "retired": scans._is_retired_service(service, day_start),
+                # 有效设备数：退网后进入回收提醒的对象数量。
+                "device_count": device_counts.get(service.id, 0),
             }
         )
     return rows
