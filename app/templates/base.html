@@ -40,9 +40,8 @@
           </details>
           {% endif %}
           {% if can_read_callback %}
-          <details class="nav-section" {% if path.startswith('/contacts') or path.startswith('/scan-schedules') or path.startswith('/scripts') or path.startswith('/calls') or path.startswith('/sms') %}open{% endif %}>
+          <details class="nav-section" {% if path.startswith('/scan-schedules') or path.startswith('/scripts') or path.startswith('/calls') or path.startswith('/sms') %}open{% endif %}>
             <summary>回访与通话</summary>
-            <a class="{% if path.startswith('/contacts') %}active{% endif %}" href="/contacts">通讯录</a>
             <a class="{% if path.startswith('/scan-schedules') %}active{% endif %}" href="/scan-schedules">扫描通知</a>
             <a class="{% if path.startswith('/scripts') %}active{% endif %}" href="/scripts">话术管理</a>
             <a class="{% if path.startswith('/calls') %}active{% endif %}" href="/calls">通话记录</a>

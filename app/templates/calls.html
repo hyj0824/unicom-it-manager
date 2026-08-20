@@ -29,7 +29,7 @@
         {% for task in tasks %}
           <tr id="task-{{ task.id }}">
             <td>{{ task.due_at|dt }}</td>
-            <td>{{ task.customer.name }}</td>
+            <td>{{ task.customer_name or '-' }}</td>
             <td>{{ task.contact.name if task.contact else "-" }}</td>
             <td class="mono">{{ task.dial_number or "-" }}</td>
             <td>{{ task.script.title }}</td>
@@ -67,12 +67,8 @@
           <option value="{{ option }}" {% if option == status_filter %}selected{% endif %}>{{ option|status_label }}</option>
         {% endfor %}
       </select>
-      <select name="customer_id">
-        <option value="">全部客户</option>
-        {% for customer in customers %}
-          <option value="{{ customer.id }}" {% if customer.id == customer_id %}selected{% endif %}>{{ customer.name }}</option>
-        {% endfor %}
-      </select>
+      <input list="call-customer-options" name="customer" value="{{ customer }}" placeholder="客户名称" autocomplete="off">
+      <datalist id="call-customer-options">{% for name in customers %}<option value="{{ name }}"></option>{% endfor %}</datalist>
       <input type="date" name="date_from" value="{{ date_from }}" title="起始日期">
       <span class="subtle">至</span>
       <input type="date" name="date_to" value="{{ date_to }}" title="结束日期">
@@ -98,7 +94,7 @@
         {% for record in records %}
           <tr>
             <td>{{ record.created_at|dt }}</td>
-            <td>{{ record.customer.name }}</td>
+            <td>{{ record.customer_name or '-' }}</td>
             <td>{{ record.contact.name if record.contact else "-" }}</td>
             <td class="mono">{{ record.dial_number or "-" }}</td>
             <td>{{ record.script.title }}</td>
@@ -115,7 +111,7 @@
     </div>
     {% if last_page > 1 %}
       <div class="panel-foot pagination">
-        {% set base_qs = 'status=' ~ status_filter ~ '&customer_id=' ~ customer_id ~ '&date_from=' ~ date_from ~ '&date_to=' ~ date_to %}
+        {% set base_qs = 'status=' ~ status_filter ~ '&customer=' ~ customer ~ '&date_from=' ~ date_from ~ '&date_to=' ~ date_to %}
         <span class="subtle">第 {{ page }} / {{ last_page }} 页</span>
         {% if page > 1 %}
           <a class="button secondary small" href="/calls?{{ base_qs }}&page={{ page - 1 }}">上一页</a>

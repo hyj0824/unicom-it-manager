@@ -32,10 +32,10 @@
               <td>{{ device.recovery_reason_item.label if device.recovery_reason_item else "-" }}</td>
               <td class="actions">{% if can('submit', 'network') %}
                 <button class="button secondary small" type="button" data-modal-open="device-modal" data-modal-title="编辑设备" data-edit-action="/devices/{{ device.id }}/edit"
-                        data-field-device_code="{{ device.device_code }}" data-field-business_service_search="{{ device.business_service.service_number }} - {{ device.business_service.customer.name }}" data-field-business_service_id="{{ device.business_service_id }}"
+                        data-field-device_code="{{ device.device_code }}" data-field-business_service_search="{{ device.business_service.service_number }} - {{ device.business_service.customer_name }}" data-field-business_service_id="{{ device.business_service_id }}"
                         data-field-asset_class="{{ device.asset_class_item.label if device.asset_class_item else '' }}" data-field-device_type="{{ device.device_type_item.label if device.device_type_item else '' }}"
                         data-field-recovery_status="{{ device.recovery_status_item.label if device.recovery_status_item else '' }}" data-field-recovery_reason="{{ device.recovery_reason_item.label if device.recovery_reason_item else '' }}"
-                        data-field-maintenance_contact_search="{{ device.maintenance_contact.contact.name if device.maintenance_contact and device.maintenance_contact.contact else '' }}" data-field-maintenance_contact_id="{{ device.maintenance_contact_id or '' }}"
+                        data-field-maintenance_name="{{ device.maintenance_name }}" data-field-maintenance_phone="{{ device.maintenance_phone }}"
                         data-field-vendor_model="{{ device.vendor_model }}" data-field-location="{{ device.location }}" data-field-asset_value="{{ device.asset_value or '' }}">编辑</button>
               {% endif %}</td>
             </tr>
@@ -52,13 +52,12 @@
     </div>
   </section>
 
-  <datalist id="business-service-options">{% for service in services %}<option value="{{ service.service_number }} - {{ service.customer.name }}" data-id="{{ service.id }}"></option>{% endfor %}</datalist>
+  <datalist id="business-service-options">{% for service in services %}<option value="{{ service.service_number }} - {{ service.customer_name }}" data-id="{{ service.id }}"></option>{% endfor %}</datalist>
   <datalist id="asset-class-options">{% for item in asset_classes %}<option value="{{ item.label }}"></option>{% endfor %}</datalist>
   <datalist id="device-type-options">{% for item in device_types %}<option value="{{ item.label }}"></option>{% endfor %}</datalist>
   <datalist id="recovery-status-options">{% for item in recovery_statuses %}<option value="{{ item.label }}" data-id="{{ item.id }}"></option>{% endfor %}</datalist>
   <datalist id="device-business-options">{% for item in services %}<option value="{{ item.service_number }}" data-id="{{ item.id }}"></option>{% endfor %}</datalist>
   <datalist id="recovery-reason-options">{% for item in recovery_reasons %}<option value="{{ item.label }}"></option>{% endfor %}</datalist>
-  <datalist id="maintenance-contact-options">{% for link in maintenance_contacts %}<option value="{{ link.contact.name or '-' }} - {{ link.customer.name }}{% if link.contact.phone %} ({{ link.contact.phone }}){% endif %}" data-id="{{ link.id }}"></option>{% endfor %}</datalist>
 
   {% if can('submit', 'network') %}<div class="modal" id="device-modal" role="dialog" aria-modal="true" aria-labelledby="device-modal-title"{% if edit_device %} data-modal-auto-open="true"{% endif %}>
     <div class="modal-backdrop" data-modal-close></div>
@@ -67,7 +66,7 @@
       <form class="stack" method="post" action="{{ '/devices/' ~ edit_device.id ~ '/edit' if edit_device else '/devices' }}" data-modal-form data-default-action="/devices">
         <label>设备编码<input name="device_code" data-modal-field="device_code" value="{{ fd.get('device_code', edit_device.device_code if edit_device else '') }}" required></label>
         <label>所属业务
-          <input name="business_service_search" data-modal-field="business_service_search" list="business-service-options" data-lookup-target="device-business-service-id" autocomplete="off" value="{{ edit_device.business_service.service_number ~ ' - ' ~ edit_device.business_service.customer.name if edit_device else '' }}" placeholder="输入或搜索业务号码" required>
+          <input name="business_service_search" data-modal-field="business_service_search" list="business-service-options" data-lookup-target="device-business-service-id" autocomplete="off" value="{{ edit_device.business_service.service_number ~ ' - ' ~ edit_device.business_service.customer_name if edit_device else '' }}" placeholder="输入或搜索业务号码" required>
           <input type="hidden" id="device-business-service-id" name="business_service_id" data-modal-field="business_service_id" value="{{ edit_device.business_service_id if edit_device else '' }}">
         </label>
         <div class="grid two">
@@ -76,10 +75,8 @@
           <label>资产原值/购置价格<input type="number" step="0.01" name="asset_value" data-modal-field="asset_value" value="{{ fd.get('asset_value', edit_device.asset_value if edit_device else '') }}"></label>
           <label>回收状态<input class="dictionary-input" name="recovery_status" data-modal-field="recovery_status" list="recovery-status-options" autocomplete="off" value="{{ fd.get('recovery_status', edit_device.recovery_status_item.label if edit_device and edit_device.recovery_status_item else '') }}"></label>
           <label>回收原因<input class="dictionary-input" name="recovery_reason" data-modal-field="recovery_reason" list="recovery-reason-options" autocomplete="off" value="{{ fd.get('recovery_reason', edit_device.recovery_reason_item.label if edit_device and edit_device.recovery_reason_item else '') }}"></label>
-          <label>维护责任人
-            <input name="maintenance_contact_search" data-modal-field="maintenance_contact_search" list="maintenance-contact-options" data-lookup-target="device-maintenance-contact-id" autocomplete="off" value="{{ edit_device.maintenance_contact.contact.name if edit_device and edit_device.maintenance_contact and edit_device.maintenance_contact.contact else '' }}" placeholder="输入或搜索责任人">
-            <input type="hidden" id="device-maintenance-contact-id" name="maintenance_contact_id" data-modal-field="maintenance_contact_id" value="{{ edit_device.maintenance_contact_id if edit_device else '' }}">
-          </label>
+          <label>维护责任人<input name="maintenance_name" data-modal-field="maintenance_name" value="{{ fd.get('maintenance_name', edit_device.maintenance_name if edit_device else (current_user.name if not edit_device else '')) }}" placeholder="责任人姓名（默认当前登录用户）"></label>
+          <label>维护责任人电话<input name="maintenance_phone" data-modal-field="maintenance_phone" value="{{ fd.get('maintenance_phone', edit_device.maintenance_phone if edit_device else (current_user.phone if not edit_device else '')) }}" placeholder="手机号"></label>
         </div>
         <label>设备厂家+型号<input name="vendor_model" data-modal-field="vendor_model" value="{{ fd.get('vendor_model', edit_device.vendor_model if edit_device else '') }}"></label>
         <label>设备放置地点<input name="location" data-modal-field="location" value="{{ fd.get('location', edit_device.location if edit_device else '') }}"></label>

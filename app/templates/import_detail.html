@@ -83,8 +83,6 @@
 
       <div class="button-row correction-actions"><button class="button primary" type="submit">保存并重新校验</button><a class="button ghost" href="/imports/{{ batch.id }}">放弃更正</a></div>
       <datalist id="customer-options">{% for customer in customers %}<option value="{{ customer.name }}">{% endfor %}</datalist>
-      <datalist id="contact-name-options">{% for contact in contact_options %}{% if contact.name %}<option value="{{ contact.name }}">{% endif %}{% endfor %}</datalist>
-      <datalist id="contact-phone-options">{% for contact in contact_options %}{% if contact.phone %}<option value="{{ contact.phone }}">{% endif %}{% endfor %}</datalist>
       <datalist id="channel-options">{% for value in channel_options %}<option value="{{ value }}">{% endfor %}</datalist>
       <datalist id="county-options">{% for item in counties %}<option value="{{ item.label }}">{% endfor %}</datalist>
       <datalist id="grid-options">{% for item in grids %}<option value="{{ item.label }}">{% endfor %}</datalist>

@@ -22,7 +22,7 @@
         {% for row in due_rows %}
           <tr>
             <td class="mono">{{ row.service.service_number }}</td>
-            <td>{{ row.service.customer.name }}</td>
+            <td>{{ row.service.customer_name or '-' }}</td>
             <td>{{ row.expires_label }}</td>
             <td>{{ row.account_manager or "-" }}</td>
             <td>
@@ -77,7 +77,7 @@
           <tr>
             <td class="mono">{{ row.device.device_code }}</td>
             <td class="mono">{{ row.service.service_number }}</td>
-            <td>{{ row.service.customer.name }}</td>
+            <td>{{ row.service.customer_name or '-' }}</td>
             <td>{{ row.maintenance_name or "-" }}</td>
             <td>{{ row.notify_count }}</td>
             <td class="actions">

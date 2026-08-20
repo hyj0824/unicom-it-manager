@@ -97,7 +97,12 @@ def verify_credentials(db: Session, username: str, password: str) -> dict | None
         return None
     if not user.password_hash or not verify_password(password, user.password_hash):
         return None
-    return {"type": "user", "id": user.id, "name": user.real_name or user.username}
+    return {
+        "type": "user",
+        "id": user.id,
+        "name": user.real_name or user.username,
+        "phone": user.phone,
+    }
 
 
 def login(request: Request, principal: dict) -> None:

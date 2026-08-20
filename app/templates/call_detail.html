@@ -11,7 +11,7 @@
         <a class="button secondary" href="/calls">返回列表</a>
       </div>
       <dl class="detail-list">
-        <dt>客户</dt><dd>{{ record.customer.name }}</dd>
+        <dt>客户</dt><dd>{{ record.customer_name or '-' }}</dd>
         <dt>拨号号码</dt><dd class="mono">{{ record.dial_number or "-" }}</dd>
         <dt>拨打负责人</dt><dd>{{ record.contact.name if record.contact else "-" }}</dd>
         <dt>话术</dt><dd>{{ record.script.title }}</dd>
@@ -41,10 +41,7 @@
         {% if record.task and record.task.scan_schedule %}
           <dt>扫描配置</dt><dd><a class="text-link" href="/scan-schedules?edit_id={{ record.task.scan_schedule.id }}">#{{ record.task.scan_schedule.id }} · {{ record.task.scan_schedule.name }}</a></dd>
         {% endif %}
-        {% if record.plan %}
-          <dt>回访计划（历史）</dt><dd>#{{ record.plan.id }} · {{ record.plan.customer.name }}</dd>
-        {% endif %}
-        <dt>重拨操作</dt>
+<dt>重拨操作</dt>
         <dd>
           {% if can('call_now', 'callback') and record.task and record.task.status not in ["queued", "dialing", "connected"] %}
             <form method="post" action="/tasks/{{ record.task.id }}/requeue"
