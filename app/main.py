@@ -1006,21 +1006,23 @@ def due_work_template(
 
 
 @app.get("/due-work")
-def due_work_page(
+def due_work_page(request: Request, db: Session = Depends(get_db)):
+    """历史路径兼容：维系登记已独立为 /daily-renewals，旧地址只做跳转。"""
+    auth.require_login(request)
+    return redirect_to("/daily-renewals")
+
+
+@app.get("/daily-renewals")
+def daily_renewals_page(
     request: Request,
-    type: str = "",
     error: str = "",
     notice: str = "",
     db: Session = Depends(get_db),
 ):
     auth.require_permission(db, request, "read", "business")
-    if type == "renew":
-        return due_work_template(
-            request, db, error=error, notice=notice, page_type="renew"
-        )
-    if type == "recycle":
-        return redirect_to("/daily-recycles")
-    return redirect_to("/due-work?type=renew")
+    return due_work_template(
+        request, db, error=error, notice=notice, page_type="renew"
+    )
 
 
 @app.get("/daily-recycles")

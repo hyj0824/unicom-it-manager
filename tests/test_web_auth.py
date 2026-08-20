@@ -206,7 +206,7 @@ def test_domain_read_permissions_gate_pages_and_navigation(client: TestClient, w
     assert response.status_code == 303
     for path in ["/contacts", "/scan-schedules", "/scripts", "/calls", "/sms"]:
         assert client.get(path).status_code == 200, path
-    for path in ["/ledger", "/devices", "/due-work?type=renew", "/daily-recycles", "/missing"]:
+    for path in ["/ledger", "/devices", "/daily-renewals", "/daily-recycles", "/missing"]:
         assert client.get(path).status_code == 403, path
 
     page = client.get("/contacts")

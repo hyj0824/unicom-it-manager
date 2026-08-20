@@ -169,7 +169,7 @@ def test_login_required_redirects(client: TestClient) -> None:
         "/scripts",
         "/admin/system",
         "/sms",
-        "/due-work?type=renew",
+        "/daily-renewals",
         "/daily-recycles",
     ]:
         resp = client.get(path, follow_redirects=False)
@@ -904,9 +904,9 @@ def test_daily_operations_pages_and_existing_submit_routes(client: TestClient) -
 
     legacy = client.get("/due-work", follow_redirects=False)
     assert legacy.status_code == 303
-    assert legacy.headers["location"] == "/due-work?type=renew"
+    assert legacy.headers["location"] == "/daily-renewals"
 
-    renew_page = client.get("/due-work?type=renew")
+    renew_page = client.get("/daily-renewals")
     assert renew_page.status_code == 200
     assert "客户维系登记" in renew_page.text
     assert "提前 21 天" in renew_page.text
@@ -944,7 +944,7 @@ def test_daily_operations_pages_and_existing_submit_routes(client: TestClient) -
 
 def test_navigation_groups_data_management_and_daily_operations(client: TestClient) -> None:
     login(client)
-    html = client.get("/due-work?type=renew").text
+    html = client.get("/daily-renewals").text
 
     assert "数据录入" not in html
     data_start = html.index("<summary>数据管理")
@@ -971,7 +971,7 @@ def test_navigation_groups_data_management_and_daily_operations(client: TestClie
         html.rfind('<details class="nav-section"', 0, daily_start):daily_start
     ]
     assert "open" in daily_details
-    assert 'href="/due-work?type=renew">客户维系登记' in daily_section
+    assert 'href="/daily-renewals">客户维系登记' in daily_section
     assert 'href="/daily-recycles">设备回收登记' in daily_section
 
     recycle_html = client.get("/daily-recycles").text

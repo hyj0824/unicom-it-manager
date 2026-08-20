@@ -491,9 +491,9 @@ def test_due_work_requires_login_and_lists_window(web_client) -> None:
     _login(client)
     redirect = client.get("/due-work", follow_redirects=False)
     assert redirect.status_code == 303
-    assert redirect.headers["location"] == "/due-work?type=renew"
+    assert redirect.headers["location"] == "/daily-renewals"
 
-    response = client.get("/due-work?type=renew")
+    response = client.get("/daily-renewals")
     assert response.status_code == 200
     assert "848DIAWEB1001" in response.text
     assert "848DIAWEB1002" not in response.text
@@ -845,7 +845,7 @@ def test_due_work_pending_hides_buttons_and_blocks_submit(web_client) -> None:
     )
     assert response.status_code == 303
 
-    page = client.get("/due-work?type=renew").text
+    page = client.get("/daily-renewals").text
     assert "已有申请待审核" in page
     assert f"/due-work/business/{service_id}/renew" not in page
     assert f"/due-work/business/{service_id}/retire" not in page
@@ -884,7 +884,7 @@ def test_retired_business_hides_renew_and_retire_buttons(web_client) -> None:
         apply_change_set(db, change_set, 22)
         db.commit()
 
-    page = client.get("/due-work?type=renew").text
+    page = client.get("/daily-renewals").text
     assert "已退网" in page
     assert f"/due-work/business/{service_id}/renew" not in page
     assert f"/due-work/business/{service_id}/retire" not in page

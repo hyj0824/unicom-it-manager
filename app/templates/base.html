@@ -34,9 +34,9 @@
           </details>
           {% endif %}
           {% if can_read_business or can_read_network %}
-          <details class="nav-section" {% if path.startswith('/due-work') or path.startswith('/daily-recycles') %}open{% endif %}>
+          <details class="nav-section" {% if path.startswith('/daily-renewals') or path.startswith('/daily-recycles') or path.startswith('/due-work') %}open{% endif %}>
             <summary>日常运维</summary>
-            {% if can_read_business %}<a class="{% if path.startswith('/due-work') %}active{% endif %}" href="/due-work?type=renew">客户维系登记</a>{% endif %}
+            {% if can_read_business %}<a class="{% if path.startswith('/daily-renewals') %}active{% endif %}" href="/daily-renewals">客户维系登记</a>{% endif %}
             {% if can_read_network %}<a class="{% if path.startswith('/daily-recycles') %}active{% endif %}" href="/daily-recycles">设备回收登记</a>{% endif %}
           </details>
           {% endif %}

@@ -30,6 +30,13 @@
   .legend-dot:nth-child(2n) { background: var(--warning); }
   .legend-dot:nth-child(3n) { background: var(--ok); }
   .notification-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  /* 面板内容与 .panel-head（padding: 16px 18px）保持同一左右边距，避免文字贴边。 */
+  .dashboard-grid .panel > .todo-grid,
+  .dashboard-grid .panel > .notification-list,
+  .dashboard-grid .panel > .metrics,
+  .dashboard-grid .panel > .summary-grid,
+  .dashboard-grid .chart-grid { padding-left: 18px; padding-right: 18px; }
+  .dashboard-grid .chart-grid { padding-top: 18px; padding-bottom: 18px; }
   .notification-list li { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); align-items: center; font-size: 12px; }
   .notification-list li:last-child { border-bottom: 0; }
   .notification-list time { color: var(--muted); }
@@ -57,12 +64,12 @@
         <div class="todo-card">
           <span class="label">我的到期业务</span>
           <strong>{{ my_due_services }}</strong>
-          <a href="/due-work">查看维系工作</a>
+          <a href="/daily-renewals">查看维系工作</a>
         </div>
         <div class="todo-card">
           <span class="label">我的待回收设备</span>
           <strong>{{ my_due_devices }}</strong>
-          <a href="/due-work">查看回收工作</a>
+          <a href="/daily-recycles">查看回收工作</a>
         </div>
       {% endif %}
     </div>
@@ -98,7 +105,7 @@
       <div class="metric"><span>待审核</span><strong>{{ global_pending_reviews }}</strong></div>
       <div class="metric"><span>缺项总数</span><strong>{{ missing_total }}</strong></div>
     </div>
-    <div class="chart-grid" style="margin-top:18px">
+    <div class="chart-grid">
       <div class="chart-panel">
         <h3>业务状态分布</h3>
         {% for item in business_statuses %}
