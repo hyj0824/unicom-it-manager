@@ -3,11 +3,12 @@
 {% block content %}
 <style>
   .dashboard-grid { display: grid; gap: 18px; }
-  .todo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-  .todo-card { min-height: 112px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  /* 数字指标统一使用直线分隔网格（与 .summary-grid 同语言），不用圆角卡片。 */
+  .todo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); }
+  .todo-card { padding: 18px; background: var(--panel); }
   .todo-card .label { color: var(--muted); font-size: 12px; font-weight: 700; }
-  .todo-card strong { display: block; margin-top: 12px; color: var(--primary-strong); font-size: 30px; line-height: 1; }
-  .todo-card a { display: block; margin-top: 10px; color: var(--primary); font-size: 12px; }
+  .todo-card strong { display: block; margin-top: 8px; font-size: 26px; line-height: 1.2; }
+  .todo-card a { display: inline-block; margin-top: 10px; color: var(--primary); font-size: 12px; }
   .board-columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr); gap: 18px; align-items: start; }
   .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
   .chart-panel { min-width: 0; }
@@ -30,11 +31,12 @@
   .legend-dot:nth-child(2n) { background: var(--warning); }
   .legend-dot:nth-child(3n) { background: var(--ok); }
   .notification-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
-  /* 面板内容与 .panel-head（padding: 16px 18px）保持同一左右边距，避免文字贴边。 */
-  .dashboard-grid .panel > .todo-grid,
+  /* 全局统计的 .metric 在 styles.css 里是圆角卡片；看板内覆盖为直线分隔。 */
+  .dashboard-grid .metrics { gap: 1px; background: var(--line); }
+  .dashboard-grid .metric { border: 0; border-radius: 0; box-shadow: none; background: var(--panel); }
+  /* 分隔网格（todo/metrics/summary-grid）顶满面板左右，与 admin 页面一致，
+     格子内部 padding 已提供文字间距；白底列表与图表内容保留 18px 留白。 */
   .dashboard-grid .panel > .notification-list,
-  .dashboard-grid .panel > .metrics,
-  .dashboard-grid .panel > .summary-grid,
   .dashboard-grid .chart-grid { padding-left: 18px; padding-right: 18px; }
   .dashboard-grid .chart-grid { padding-top: 18px; padding-bottom: 18px; }
   .notification-list li { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); align-items: center; font-size: 12px; }
