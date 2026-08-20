@@ -21,6 +21,10 @@
       form.action = trigger.dataset.editAction || form.dataset.defaultAction || form.action;
       const title = modal.querySelector("[id$='-modal-title']");
       if (title && trigger.dataset.modalTitle) title.textContent = trigger.dataset.modalTitle;
+      const hint = modal.querySelector("[data-modal-hint]");
+      if (hint && trigger.dataset.hintText !== undefined) {
+        hint.textContent = trigger.dataset.hintText;
+      }
       modal.querySelectorAll("[data-modal-field]").forEach((field) => {
         const key = field.dataset.modalField;
         const value = trigger.getAttribute(`data-field-${key}`);

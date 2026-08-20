@@ -46,22 +46,8 @@
               {% elif row.retired %}
                 <span class="status-pill muted">已退网</span>
               {% else %}
-              <details class="row-form">
-                <summary class="button secondary small">续签申请</summary>
-                <form class="row-form-body" method="post" action="/due-work/business/{{ row.service.id }}/renew">
-                  <label>新协议到期日<input type="date" name="agreement_expires_at" min="{{ min_date }}" required></label>
-                  <label>申请理由<input name="reason" required placeholder="例如：客户已确认续签一年"></label>
-                  <button class="button primary small" type="submit">提交续签申请</button>
-                </form>
-              </details>
-              <details class="row-form">
-                <summary class="button danger small">退网申请</summary>
-                <form class="row-form-body" method="post" action="/due-work/business/{{ row.service.id }}/retire" data-confirm="确认提交退网申请？审核应用后该业务服务状态将改为「主动退网(申请拆机)」，其设备将进入回收提醒。">
-                  {% if row.device_count > 0 %}<p class="subtle">该业务下 {{ row.device_count }} 台设备将进入回收提醒。</p>{% else %}<p class="subtle">该业务下没有设备，退网后不会进入回收提醒。</p>{% endif %}
-                  <label>申请理由<input name="reason" required placeholder="例如：客户确认不续签，申请拆机"></label>
-                  <button class="button danger small" type="submit">提交退网申请</button>
-                </form>
-              </details>
+              <button class="button secondary small" type="button" data-modal-open="renew-modal" data-edit-action="/due-work/business/{{ row.service.id }}/renew">续签申请</button>
+              <button class="button danger small" type="button" data-modal-open="retire-modal" data-edit-action="/due-work/business/{{ row.service.id }}/retire" data-hint-text="{% if row.device_count > 0 %}该业务下 {{ row.device_count }} 台设备将进入回收提醒。{% else %}该业务下没有设备，退网后不会进入回收提醒。{% endif %}">退网申请</button>
               {% endif %}
             </td>
           </tr>
@@ -98,13 +84,7 @@
               {% if row.pending %}
                 <a class="text-link" href="/reviews/{{ row.pending.id }}"><span class="status-pill warning">已有申请待审核</span></a>
               {% else %}
-              <details class="row-form">
-                <summary class="button primary small">回收完成申请</summary>
-                <form class="row-form-body" method="post" action="/due-work/device/{{ row.device.id }}/recover" data-confirm="确认提交回收申请？审核应用后该设备回收状态将改为「已回收」。">
-                  <label>申请理由<input name="reason" required placeholder="例如：设备已回收入库"></label>
-                  <button class="button primary small" type="submit">提交回收申请</button>
-                </form>
-              </details>
+              <button class="button primary small" type="button" data-modal-open="recover-modal" data-edit-action="/due-work/device/{{ row.device.id }}/recover">回收完成申请</button>
               {% endif %}
             </td>
           </tr>
@@ -116,4 +96,41 @@
     </div>
   </section>
   {% endif %}
+{% endblock %}
+
+{% block modals %}
+  <div class="modal" id="renew-modal" role="dialog" aria-modal="true" aria-labelledby="renew-modal-title">
+    <div class="modal-backdrop" data-modal-close></div>
+    <section class="modal-dialog">
+      <div class="panel-head"><h2 id="renew-modal-title">续签申请</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
+      <form class="stack" method="post" action="/due-work/business/0/renew" data-modal-form>
+        <label>新协议到期日<input type="date" name="agreement_expires_at" min="{{ min_date }}" required></label>
+        <label>申请理由<input name="reason" required placeholder="例如：客户已确认续签一年"></label>
+        <div class="button-row"><button class="button primary" type="submit">提交续签申请</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div class="modal" id="retire-modal" role="dialog" aria-modal="true" aria-labelledby="retire-modal-title">
+    <div class="modal-backdrop" data-modal-close></div>
+    <section class="modal-dialog">
+      <div class="panel-head"><h2 id="retire-modal-title">退网申请</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
+      <form class="stack" method="post" action="/due-work/business/0/retire" data-modal-form data-confirm="确认提交退网申请？审核应用后该业务服务状态将改为「主动退网(申请拆机)」，其设备将进入回收提醒。">
+        <p class="subtle" data-modal-hint></p>
+        <label>申请理由<input name="reason" required placeholder="例如：客户确认不续签，申请拆机"></label>
+        <div class="button-row"><button class="button danger" type="submit">提交退网申请</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div class="modal" id="recover-modal" role="dialog" aria-modal="true" aria-labelledby="recover-modal-title">
+    <div class="modal-backdrop" data-modal-close></div>
+    <section class="modal-dialog">
+      <div class="panel-head"><h2 id="recover-modal-title">回收完成申请</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
+      <form class="stack" method="post" action="/due-work/device/0/recover" data-modal-form data-confirm="确认提交回收申请？审核应用后该设备回收状态将改为「已回收」。">
+        <label>申请理由<input name="reason" required placeholder="例如：设备已回收入库"></label>
+        <div class="button-row"><button class="button primary" type="submit">提交回收申请</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
+      </form>
+    </section>
+  </div>
 {% endblock %}
