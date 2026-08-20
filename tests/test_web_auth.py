@@ -119,6 +119,7 @@ def test_admin_pages_require_system_permissions(client: TestClient, webdb) -> No
         "/admin/users",
         f"/admin/users/{user_id}/edit",
         f"/admin/users/{user_id}/password",
+        f"/admin/users/{user_id}/delete",
     ]:
         response = client.post(path, data={"enabled": "1"}, follow_redirects=False)
         assert response.status_code == 403, path
@@ -780,3 +781,86 @@ def test_legacy_superadmin_user_is_read_only(client: TestClient, webdb) -> None:
     page = client.get("/admin/users")
     assert "内置管理员只读" in page.text
     assert f"edit_id={admin_id}" not in page.text
+
+
+def test_admin_user_delete_removes_account_and_role_links(client: TestClient, webdb) -> None:
+    login(client)
+    with webdb() as db:
+        role = Role(code="del-role", name="删除测试角色", description="", is_preset=False)
+        db.add(role)
+        db.flush()
+        user = User(
+            username="to-delete",
+            real_name="待删除用户",
+            phone="13900000002",
+            password_hash=hash_password("to-delete-pass"),
+            is_enabled=True,
+        )
+        db.add(user)
+        db.flush()
+        db.add(UserRole(user_id=user.id, role_id=role.id))
+        db.commit()
+        user_id = user.id
+        role_id = role.id
+
+    resp = client.post(f"/admin/users/{user_id}/delete", follow_redirects=False)
+    assert resp.status_code == 303
+    with webdb() as db:
+        assert db.get(User, user_id) is None
+        assert db.scalar(select(UserRole).where(UserRole.user_id == user_id)) is None
+        # 角色本身保留，只是解绑。
+        assert db.get(Role, role_id) is not None
+
+
+def test_admin_user_delete_refuses_superadmin_and_self(client: TestClient, webdb) -> None:
+    login(client)
+    with webdb() as db:
+        superadmin = User(
+            username="sa-del",
+            real_name="超管",
+            phone="",
+            password_hash=hash_password("sa-del-pass"),
+            is_enabled=True,
+            is_superadmin=True,
+        )
+        db.add(superadmin)
+        db.commit()
+        super_id = superadmin.id
+        manager = User(
+            username="manager-1",
+            real_name="管理员甲",
+            phone="13900000003",
+            password_hash=hash_password("mgr-pass-1"),
+            is_enabled=True,
+        )
+        db.add(manager)
+        db.flush()
+        role = Role(code=f"mgr-role-{manager.id}", name="管理角色", description="")
+        db.add(role)
+        db.flush()
+        permission = db.scalar(select(Permission).where(Permission.code == "manage_users"))
+        db.add(
+            RolePermission(
+                role_id=role.id, permission_id=permission.id, domain="system"
+            )
+        )
+        db.add(UserRole(user_id=manager.id, role_id=role.id))
+        db.commit()
+        manager_id = manager.id
+
+    # 内置超管账号不可删除。
+    resp = client.post(f"/admin/users/{super_id}/delete", follow_redirects=False)
+    assert resp.status_code == 403
+
+    # 普通管理员不能删除自己（可改为停用）。
+    client.post("/logout", follow_redirects=False)
+    resp = client.post(
+        "/login",
+        data={"username": "manager-1", "password": "mgr-pass-1"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    resp = client.post(f"/admin/users/{manager_id}/delete", follow_redirects=False)
+    assert resp.status_code == 403
+    with webdb() as db:
+        assert db.get(User, manager_id) is not None

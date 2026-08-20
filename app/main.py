@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import case, func, or_, select, text
+from sqlalchemy import case, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -1744,6 +1744,30 @@ async def admin_user_password(user_id: int, request: Request, db: Session = Depe
     user.password_hash = hash_password(password)
     # 管理员重置后视为发放新初始密码，被重置账号下次登录须改密。
     user.force_password_change = True
+    db.commit()
+    return redirect_to("/admin/users")
+
+
+@app.post("/admin/users/{user_id}/delete")
+def admin_user_delete(user_id: int, request: Request, db: Session = Depends(get_db)):
+    """删除账号：不能删除内置超管，也不能删除当前登录账号。
+
+    历史审计与变更申请记录保留原样（页面只展示用户 ID，悬空不报错）；
+    角色绑定随账号一起删除。
+    """
+    auth.require_permission(db, request, "manage_users", "system")
+    user = get_or_404(db, User, user_id)
+    if user.is_superadmin:
+        raise HTTPException(status_code=403, detail="内置管理员账号只读，不能删除。")
+    if _user_id(request) == user.id:
+        raise HTTPException(status_code=403, detail="不能删除当前登录账号，可改为停用。")
+    db.execute(delete(UserRole).where(UserRole.user_id == user.id))
+    db.delete(user)
+    ledger_service.log_action(
+        db, "manage_users", _user_id(request), "user", user.id,
+        json.dumps({"operation": "delete", "username": user.username}, ensure_ascii=False),
+        _client_ip(request),
+    )
     db.commit()
     return redirect_to("/admin/users")
 

@@ -75,7 +75,7 @@
               <td>{% if user.force_password_change %}<span class="status-pill warning" title="登录后必须先修改初始密码">需改密</span>{% else %}-{% endif %}</td>
               <td><span class="status-pill {% if user.is_enabled %}ok{% else %}muted{% endif %}">{{ "启用" if user.is_enabled else "停用" }}</span></td>
               <td>{{ user.last_login_at|dt or "-" }}</td>
-              <td class="actions">{% if not user.is_superadmin %}<a class="button secondary small" href="/admin/users?edit_id={{ user.id }}">编辑</a>{% else %}<span class="subtle">内置管理员只读</span>{% endif %}</td>
+              <td class="actions">{% if not user.is_superadmin %}<a class="button secondary small" href="/admin/users?edit_id={{ user.id }}">编辑</a>{% if not current_user or current_user.id != user.id %}<form method="post" action="/admin/users/{{ user.id }}/delete" data-confirm="确认删除用户「{{ user.username }}」？删除后无法恢复，其历史审计与申请记录将保留但不再关联账号。"><button class="button danger small" type="submit">删除</button></form>{% endif %}{% else %}<span class="subtle">内置管理员只读</span>{% endif %}</td>
             </tr>
           {% else %}
             <tr><td colspan="9" class="empty">暂无用户。用户只能由管理员创建。</td></tr>
