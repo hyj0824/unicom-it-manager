@@ -6,7 +6,7 @@
   <section class="panel devices-page">
     <div class="panel-head">
       <div><h2>网络设备</h2><span class="subtle">共 {{ total }} 条设备记录</span></div>
-      <button class="button primary" type="button" data-modal-open="device-modal" data-modal-title="新增设备">新增设备</button>
+      {% if can('submit', 'network') %}<button class="button primary" type="button" data-modal-open="device-modal" data-modal-title="新增设备">新增设备</button>{% endif %}
     </div>
     <form class="filter-bar" method="get" action="/devices">
       <input name="q" value="{{ q }}" placeholder="设备编码 / 厂家型号" aria-label="搜索设备">
@@ -26,7 +26,7 @@
               <td>{{ device.device_type_item.label if device.device_type_item else "-" }}</td><td>{{ device.asset_class_item.label if device.asset_class_item else "-" }}</td>
               <td>{{ device.location or "-" }}</td><td>{% if device.recovery_status_item %}<span class="status-pill muted">{{ device.recovery_status_item.label }}</span>{% else %}<span class="status-pill short_call">缺项</span>{% endif %}</td>
               <td>{{ device.recovery_reason_item.label if device.recovery_reason_item else "-" }}</td>
-              <td class="actions">
+              <td class="actions">{% if can('submit', 'network') %}
                 <button class="button secondary small" type="button" data-modal-open="device-modal" data-modal-title="编辑设备" data-edit-action="/devices/{{ device.id }}/edit"
                         data-field-device_code="{{ device.device_code }}" data-field-business_service_search="{{ device.business_service.service_number }} - {{ device.business_service.customer.name }}" data-field-business_service_id="{{ device.business_service_id }}"
                         data-field-asset_class="{{ device.asset_class_item.label if device.asset_class_item else '' }}" data-field-device_type="{{ device.device_type_item.label if device.device_type_item else '' }}"
@@ -34,7 +34,7 @@
                         data-field-maintenance_contact_search="{{ device.maintenance_contact.contact.name if device.maintenance_contact and device.maintenance_contact.contact else '' }}" data-field-maintenance_contact_id="{{ device.maintenance_contact_id or '' }}"
                         data-field-vendor_model="{{ device.vendor_model }}" data-field-location="{{ device.location }}" data-field-asset_value="{{ device.asset_value or '' }}">编辑</button>
                 <form method="post" action="/devices/{{ device.id }}/delete" data-confirm="作废该设备？"><button class="button danger small" type="submit">作废</button></form>
-              </td>
+              {% endif %}</td>
             </tr>
           {% else %}<tr><td colspan="8" class="empty">暂无设备记录。</td></tr>{% endfor %}
         </tbody>
@@ -56,7 +56,7 @@
   <datalist id="recovery-reason-options">{% for item in recovery_reasons %}<option value="{{ item.label }}"></option>{% endfor %}</datalist>
   <datalist id="maintenance-contact-options">{% for link in maintenance_contacts %}<option value="{{ link.contact.name or '-' }} - {{ link.customer.name }}{% if link.contact.phone %} ({{ link.contact.phone }}){% endif %}" data-id="{{ link.id }}"></option>{% endfor %}</datalist>
 
-  <div class="modal" id="device-modal" role="dialog" aria-modal="true" aria-labelledby="device-modal-title"{% if edit_device %} data-modal-auto-open="true"{% endif %}>
+  {% if can('submit', 'network') %}<div class="modal" id="device-modal" role="dialog" aria-modal="true" aria-labelledby="device-modal-title"{% if edit_device %} data-modal-auto-open="true"{% endif %}>
     <div class="modal-backdrop" data-modal-close></div>
     <section class="modal-dialog">
       <div class="panel-head"><h2 id="device-modal-title">{{ "编辑设备" if edit_device else "新增设备" }}</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
@@ -82,5 +82,5 @@
         <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
       </form>
     </section>
-  </div>
+  </div>{% endif %}
 {% endblock %}

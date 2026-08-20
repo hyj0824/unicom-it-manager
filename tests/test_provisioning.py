@@ -119,7 +119,7 @@ def test_business_payload_creates_account_manager_account(webdb) -> None:
         user = db.scalar(select(User).where(User.username == "13900000001"))
         assert user is not None
         assert user.real_name == "李四"
-        assert user.display_name == "李四"
+        assert user.display_name == ""  # legacy column is retained but no longer populated
         assert user.phone == "13900000001"
         assert user.auto_provisioned is True
         assert user.force_password_change is True

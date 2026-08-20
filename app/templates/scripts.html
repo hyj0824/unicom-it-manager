@@ -10,7 +10,7 @@
         <h2>话术列表</h2>
         <span class="subtle">共 {{ scripts|length }} 条话术</span>
       </div>
-      <button class="button primary" type="button" data-modal-open="scripts-modal" data-modal-title="新增话术">新增话术</button>
+      {% if can('submit', 'callback') %}<button class="button primary" type="button" data-modal-open="scripts-modal" data-modal-title="新增话术">新增话术</button>{% endif %}
     </div>
     <div class="table-wrap">
       <table>
@@ -27,13 +27,13 @@
                 <div class="mono">{{ script.wav_path or "-" }}</div>
                 {% if script|script_audio_url %}<audio class="audio-preview" controls preload="none" src="{{ script|script_audio_url }}"></audio>{% endif %}
               </td>
-              <td class="actions">
+              <td class="actions">{% if can('submit', 'callback') %}
                 <button class="button secondary small" type="button" data-modal-open="scripts-modal" data-modal-title="编辑话术"
                         data-edit-action="/scripts/{{ script.id }}/edit"
                         data-field-title="{{ script.title }}" data-field-body="{{ script.body }}" data-field-wav_path="{{ script.wav_path or '' }}">编辑</button>
                 <form method="post" action="/scripts/{{ script.id }}/generate-audio"><button class="button secondary small" type="submit">生成音频</button></form>
                 <form method="post" action="/scripts/{{ script.id }}/delete" data-confirm="删除该话术？"><button class="button danger small" type="submit">删除</button></form>
-              </td>
+              {% endif %}</td>
             </tr>
           {% else %}
             <tr><td colspan="4" class="empty">暂无话术。</td></tr>
@@ -43,7 +43,7 @@
     </div>
   </section>
 
-  <div class="modal" id="scripts-modal" role="dialog" aria-modal="true" aria-labelledby="scripts-modal-title"{% if edit_script %} data-modal-auto-open="true"{% endif %}>
+  {% if can('submit', 'callback') %}<div class="modal" id="scripts-modal" role="dialog" aria-modal="true" aria-labelledby="scripts-modal-title"{% if edit_script %} data-modal-auto-open="true"{% endif %}>
     <div class="modal-backdrop" data-modal-close></div>
     <section class="modal-dialog">
       <div class="panel-head"><h2 id="scripts-modal-title">{{ "编辑话术" if edit_script else "新增话术" }}</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
@@ -54,5 +54,5 @@
         <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
       </form>
     </section>
-  </div>
+  </div>{% endif %}
 {% endblock %}

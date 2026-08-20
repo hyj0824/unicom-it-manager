@@ -75,7 +75,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def _principal_scope(db: Session, request) -> tuple[bool, str]:
-    """Return (global_scope, phone) for admin/superadmin or a normal user."""
+    """Return (global_scope, phone); only the built-in admin has global scope."""
 
     principal = auth.current_user(request)
     if not principal:
@@ -86,7 +86,7 @@ def _principal_scope(db: Session, request) -> tuple[bool, str]:
     user = db.get(User, user_id) if isinstance(user_id, int) else None
     if user is None:
         return False, ""
-    return bool(user.is_superadmin), (user.phone or "").strip()
+    return False, (user.phone or "").strip()
 
 
 def _review_count(db: Session, request, global_scope: bool) -> tuple[int, list[str]]:

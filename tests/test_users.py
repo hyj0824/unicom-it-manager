@@ -42,9 +42,6 @@ def test_validate_user_profile_accepts_valid_phone() -> None:
     assert validate_user_profile("张三", " 13800000000 ") is None  # 允许首尾空白
 
 
-def test_validate_user_profile_superadmin_may_skip_phone() -> None:
-    assert validate_user_profile("系统管理员", "", is_superadmin=True) is None
-    # 超管填了手机也必须格式正确；实名对超管同样必填。
-    assert "手机号格式不正确" in validate_user_profile("系统管理员", "123", is_superadmin=True)
-    assert validate_user_profile("系统管理员", "+8613800000000", is_superadmin=True) is None
-    assert validate_user_profile("", "", is_superadmin=True) == "实名必填。"
+def test_validate_user_profile_allows_blank_phone_only_when_role_authorized() -> None:
+    assert validate_user_profile("系统管理员", "") == "手机号必填（系统管理员可不填）。"
+    assert validate_user_profile("系统管理员", "", allow_blank_phone=True) is None
