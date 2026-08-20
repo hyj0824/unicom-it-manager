@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .. import audio as audio_module
 from ..audio import install_wav, script_audio_path
 from ..config import Settings
-from ..models import CallRecord, CallTask, CallbackPlan, ScanSchedule, Script
+from ..models import CallRecord, CallTask, ScanSchedule, Script
 from ..tts.none import NoneTTSProvider
 
 
@@ -87,10 +87,7 @@ def referencing_counts(db: Session, script: Script) -> dict[str, int]:
             select(func.count(ScanSchedule.id)).where(ScanSchedule.script_id == script.id)
         )
         or 0,
-        "plans": db.scalar(
-            select(func.count(CallbackPlan.id)).where(CallbackPlan.script_id == script.id)
-        )
-        or 0,
+        "plans": 0,
         "tasks": db.scalar(
             select(func.count(CallTask.id)).where(CallTask.script_id == script.id)
         )

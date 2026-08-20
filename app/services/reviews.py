@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import (
-    BusinessService, ChangeItem, ChangeSet, Contact, Customer, CustomerContact,
+    BusinessService, ChangeItem, ChangeSet,
     DictionaryCategory, DictionaryItem, ImportBatch, NetworkDevice, StagingRow, utcnow,
 )
 from . import provisioning
@@ -50,18 +50,10 @@ def _local_date(value: str):
     return parse_local_date(value, get_settings().default_timezone)
 
 
-def _contact_snapshot(service: BusinessService) -> dict[str, tuple[str, str]]:
-    result = {}
-    for link in service.customer.contact_links:
-        if link.duty in {"发展人", "客户经理", "网络维护责任人"} and link.is_active:
-            result[link.duty] = (link.contact.name or "", link.contact.phone or "")
-    return result
-
-
 def _business_changed(service: BusinessService | None, payload: dict) -> bool:
     if service is None:
         return True
-    if payload.get("customer_name", "") != service.customer.name:
+    if payload.get("customer_name", "") != service.customer_name:
         return True
     labels = {
         "county": service.county_item.label if service.county_item else "",
@@ -86,12 +78,14 @@ def _business_changed(service: BusinessService | None, payload: dict) -> bool:
         expires_at = expires_at.replace(tzinfo=None)
     if expires_at != stored_expires_at:
         return True
-    duties = {"developer": "发展人", "account_manager": "客户经理"}
-    contacts = _contact_snapshot(service)
-    return any(
-        (data.get("name", ""), data.get("phone", "")) != contacts.get(duty, ("", ""))
-        for key, duty in duties.items() for data in [payload.get("contacts", {}).get(key, {})]
-    )
+    legacy = payload.get("contacts") or {}
+    values = {
+        "developer_name": payload.get("developer_name", (legacy.get("developer") or {}).get("name", "")),
+        "developer_phone": payload.get("developer_phone", (legacy.get("developer") or {}).get("phone", "")),
+        "account_manager_name": payload.get("account_manager_name", (legacy.get("account_manager") or {}).get("name", "")),
+        "account_manager_phone": payload.get("account_manager_phone", (legacy.get("account_manager") or {}).get("phone", "")),
+    }
+    return any(str(values[key] or "").strip() != str(getattr(service, key) or "").strip() for key in values)
 
 
 def _device_changed(device: NetworkDevice | None, data: dict) -> bool:
@@ -116,12 +110,7 @@ def _device_changed(device: NetworkDevice | None, data: dict) -> bool:
     maintenance_name = str(data.get("maintenance_name", "")).strip()
     maintenance_phone = str(data.get("maintenance_phone", "")).strip()
     if maintenance_name or maintenance_phone:
-        current_link = device.maintenance_contact
-        current = (
-            current_link.contact.name if current_link and current_link.contact else "",
-            current_link.contact.phone if current_link and current_link.contact else "",
-        )
-        if (maintenance_name, maintenance_phone) != current:
+        if (maintenance_name, maintenance_phone) != (device.maintenance_name, device.maintenance_phone):
             return True
     return False
 
@@ -232,40 +221,15 @@ def preview_change_item(db: Session, item: ChangeItem) -> dict:
             "设备编码": device.device_code, "设备属性": device.asset_class_item.label if device.asset_class_item else "",
             "设备类型": device.device_type_item.label if device.device_type_item else "", "厂家型号": device.vendor_model,
             "放置地点": device.location, "回收状态": device.recovery_status_item.label if device.recovery_status_item else "",
-            "网络维护责任人": device.maintenance_contact.contact.name if device.maintenance_contact and device.maintenance_contact.contact else "",
-            "网络维护责任人联系电话": device.maintenance_contact.contact.phone if device.maintenance_contact and device.maintenance_contact.contact else "",
+            "网络维护责任人": device.maintenance_name,
+            "网络维护责任人联系电话": device.maintenance_phone,
         }
         proposed = {"所属业务": payload.get("service_number", ""), "设备编码": data.get("device_code", ""), "网络维护责任人": data.get("maintenance_name", ""), "网络维护责任人联系电话": data.get("maintenance_phone", ""), "设备属性": data.get("asset_class", ""), "设备类型": data.get("device_type", ""), "厂家型号": data.get("vendor_model", ""), "放置地点": data.get("location", ""), "回收状态": data.get("recovery_status", "")}
     else:
         service = db.get(BusinessService, item.entity_id) if item.entity_id else None
-        current = {} if service is None else {"业务号码": service.service_number, "客户": service.customer.name, "县分": service.county_item.label if service.county_item else "", "网格": service.grid_item.label if service.grid_item else "", "服务状态": service.service_status_item.label if service.service_status_item else "", "业务类型": service.business_type_item.label if service.business_type_item else "", "渠道名称": service.channel_name}
+        current = {} if service is None else {"业务号码": service.service_number, "客户": service.customer_name, "县分": service.county_item.label if service.county_item else "", "网格": service.grid_item.label if service.grid_item else "", "服务状态": service.service_status_item.label if service.service_status_item else "", "业务类型": service.business_type_item.label if service.business_type_item else "", "渠道名称": service.channel_name}
         proposed = {"业务号码": payload.get("service_number", ""), "客户": payload.get("customer_name", ""), "县分": payload.get("county", ""), "网格": payload.get("grid", ""), "服务状态": payload.get("service_status", ""), "业务类型": payload.get("business_type", ""), "渠道名称": payload.get("channel_name", "")}
     return {"item": item, "payload": payload, "current": current, "proposed": proposed, "changed_fields": [key for key, value in proposed.items() if value and current.get(key, "") != value]}
-
-
-def _get_customer(db: Session, name: str) -> Customer:
-    customer = db.scalars(select(Customer).where(Customer.name == name)).first()
-    if customer is None:
-        customer = Customer(name=name)
-        db.add(customer)
-        db.flush()
-    return customer
-
-
-def _sync_contacts(db: Session, customer: Customer, payload: dict) -> None:
-    duty_names = {"developer": "发展人", "account_manager": "客户经理"}
-    for key, duty in duty_names.items():
-        source = payload.get("contacts", {}).get(key, {})
-        name, phone = source.get("name", "").strip(), source.get("phone", "").strip()
-        if not name and not phone:
-            continue
-        contact = db.scalars(select(Contact).where(Contact.name == (name or None), Contact.phone == (phone or None))).first()
-        if contact is None:
-            contact = Contact(name=name or None, phone=phone or None)
-            db.add(contact); db.flush()
-        link = db.scalars(select(CustomerContact).where(CustomerContact.customer_id == customer.id, CustomerContact.contact_id == contact.id, CustomerContact.duty == duty)).first()
-        if link is None:
-            db.add(CustomerContact(customer_id=customer.id, contact_id=contact.id, duty=duty))
 
 
 def _apply_business(db: Session, item: ChangeItem) -> tuple[BusinessService, dict]:
@@ -279,11 +243,19 @@ def _apply_business(db: Session, item: ChangeItem) -> tuple[BusinessService, dic
     customer_name = payload.get("customer_name", "").strip()
     if not customer_name:
         raise ChangeApplicationError("业务变更缺少客户名称。")
-    customer = _get_customer(db, customer_name)
     if service is None:
-        service = BusinessService(service_number=payload.get("service_number", ""), customer_id=customer.id)
+        service = BusinessService(service_number=payload.get("service_number", ""))
         db.add(service); db.flush()
-    service.customer_id = customer.id
+    service.customer_name = customer_name
+    legacy = payload.get("contacts") or {}
+    values = {
+        "developer_name": payload.get("developer_name", (legacy.get("developer") or {}).get("name", "")),
+        "developer_phone": payload.get("developer_phone", (legacy.get("developer") or {}).get("phone", "")),
+        "account_manager_name": payload.get("account_manager_name", (legacy.get("account_manager") or {}).get("name", "")),
+        "account_manager_phone": payload.get("account_manager_phone", (legacy.get("account_manager") or {}).get("phone", "")),
+    }
+    for key, value in values.items():
+        setattr(service, key, str(value or "").strip())
     service.county_item_id = _item_id(db, "county", payload.get("county", "")); service.grid_item_id = _item_id(db, "grid", payload.get("grid", ""))
     service.service_status_item_id = _item_id(db, "service_status", payload.get("service_status", "")); service.business_type_item_id = _item_id(db, "business_type", payload.get("business_type", ""))
     # 数据质量与来源行只在导入 patch 显式提供时改写：人工变更申请
@@ -296,35 +268,7 @@ def _apply_business(db: Session, item: ChangeItem) -> tuple[BusinessService, dic
         service.source_row = f"导入批次 #{payload.get('batch_id', '')} 第 {'、'.join(map(str, payload.get('row_numbers', [])))} 行"
     service.is_active = True
     if item.operation == "update": service.version += 1
-    _sync_contacts(db, customer, payload)
     return service, payload
-
-
-def _maintenance_contact_link(db: Session, customer: Customer, name: str, phone: str) -> CustomerContact | None:
-    name, phone = name.strip(), phone.strip()
-    if not name and not phone:
-        return None
-    contact = db.scalars(
-        select(Contact).where(Contact.name == (name or None), Contact.phone == (phone or None))
-    ).first()
-    if contact is None:
-        contact = Contact(name=name or None, phone=phone or None)
-        db.add(contact)
-        db.flush()
-    link = db.scalars(
-        select(CustomerContact).where(
-            CustomerContact.customer_id == customer.id,
-            CustomerContact.contact_id == contact.id,
-            CustomerContact.duty == "网络维护责任人",
-        )
-    ).first()
-    if link is None:
-        link = CustomerContact(customer_id=customer.id, contact_id=contact.id, duty="网络维护责任人")
-        db.add(link)
-        db.flush()
-    elif not link.is_active:
-        link.is_active = True
-    return link
 
 
 def _apply_device(db: Session, item: ChangeItem) -> tuple[NetworkDevice, dict]:
@@ -349,9 +293,8 @@ def _apply_device(db: Session, item: ChangeItem) -> tuple[NetworkDevice, dict]:
     except InvalidOperation as exc: raise ChangeApplicationError(f"设备编码 {data.get('device_code')} 的资产价格无效。") from exc
     maintenance_name = str(data.get("maintenance_name", "")).strip()
     maintenance_phone = str(data.get("maintenance_phone", "")).strip()
-    if maintenance_name or maintenance_phone:
-        link = _maintenance_contact_link(db, service.customer, maintenance_name, maintenance_phone)
-        device.maintenance_contact_id = link.id if link else None
+    device.maintenance_name = maintenance_name
+    device.maintenance_phone = maintenance_phone
     if item.operation == "update": device.version += 1
     return device, payload
 

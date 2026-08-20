@@ -12,12 +12,9 @@ from ..models import (
     CallEvent,
     CallRecord,
     CallTask,
-    Customer,
-    Contact,
     Script,
     utcnow,
 )
-from .customers import default_contact as default_customer_contact
 
 
 PHONE_RE = re.compile(r"^\+?[0-9]{5,20}$")
@@ -70,9 +67,10 @@ ACTIVE_TASK_STATUSES = {"queued", "dialing", "connected"}
 
 def create_manual_call_task(
     db: Session,
-    customer: Customer,
+    customer_name: str,
     script: Script,
-    contact: Contact | None = None,
+    caller_name: str = "",
+    caller_phone: str = "",
     due_at: datetime | None = None,
     status: str = "queued",
     message: str = "Manual call task queued.",
@@ -80,20 +78,17 @@ def create_manual_call_task(
 ) -> CallTask:
     """从客户直接发起「立即拨打一次」：生成一条独立的一次性任务。
 
-    不创建、不修改任何 CallbackPlan / ScanSchedule（两者关联均留空），
+    不创建、不修改任何扫描配置，
     任务与通话记录共用一条关联，便于在通话详情追溯来源。
     """
 
-    contact = contact or default_customer_contact(db, customer)
-    dial_number = (contact.phone or "").strip() if contact else ""
+    dial_number = caller_phone.strip()
     if not dial_number:
         raise ValueError("该客户没有可拨打的电话：请先添加带有效联系电话的负责人。")
     settings = get_settings()
     task = CallTask(
-        plan=None,
-        customer=customer,
+        customer_name=customer_name.strip(),
         script=script,
-        contact=contact,
         dial_number=dial_number,
         due_at=as_utc(due_at) or utcnow(),
         status=status,
@@ -102,10 +97,8 @@ def create_manual_call_task(
     )
     record = CallRecord(
         task=task,
-        plan=None,
-        customer=customer,
+        customer_name=customer_name.strip(),
         script=script,
-        contact=contact,
         dial_number=dial_number,
         status=status,
     )
@@ -138,10 +131,8 @@ def requeue_call_task(
     if record is None:
         record = CallRecord(
             task=task,
-            plan=task.plan,
-            customer=task.customer,
+            customer_name=task.customer_name,
             script=task.script,
-            contact=task.contact,
             dial_number=task.dial_number,
             status="queued",
         )

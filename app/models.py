@@ -46,24 +46,6 @@ class TimestampMixin:
     )
 
 
-class Customer(TimestampMixin, Base):
-    __tablename__ = "customers"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # 客户名称不是业务唯一键；电话不存客户表，由 contacts 承担（见数据模型基线）。
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-    plans: Mapped[list["CallbackPlan"]] = relationship(back_populates="customer")
-    call_tasks: Mapped[list["CallTask"]] = relationship(back_populates="customer")
-    call_records: Mapped[list["CallRecord"]] = relationship(back_populates="customer")
-    contact_links: Mapped[list["CustomerContact"]] = relationship(
-        back_populates="customer", cascade="all, delete-orphan"
-    )
-
-
 class Script(TimestampMixin, Base):
     __tablename__ = "scripts"
 
@@ -75,31 +57,8 @@ class Script(TimestampMixin, Base):
     tts_error: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     wav_path: Mapped[str] = mapped_column(String(500), default="", nullable=False)
 
-    plans: Mapped[list["CallbackPlan"]] = relationship(back_populates="script")
     call_tasks: Mapped[list["CallTask"]] = relationship(back_populates="script")
     call_records: Mapped[list["CallRecord"]] = relationship(back_populates="script")
-
-
-class CallbackPlan(TimestampMixin, Base):
-    __tablename__ = "callback_plans"
-    __table_args__ = (Index("ix_callback_plans_contact_id", "contact_id"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
-    script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id"), nullable=False)
-    contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
-    trigger_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    cron_expr: Mapped[str] = mapped_column(String(120), default="", nullable=False)
-    timezone: Mapped[str] = mapped_column(String(80), default="Asia/Shanghai", nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-
-    customer: Mapped[Customer] = relationship(back_populates="plans")
-    script: Mapped[Script] = relationship(back_populates="plans")
-    contact: Mapped["Contact | None"] = relationship()
-    call_tasks: Mapped[list["CallTask"]] = relationship(back_populates="plan")
-    call_records: Mapped[list["CallRecord"]] = relationship(back_populates="plan")
 
 
 class ScanSchedule(TimestampMixin, Base):
@@ -139,15 +98,13 @@ class CallTask(TimestampMixin, Base):
     __tablename__ = "call_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    plan_id: Mapped[int | None] = mapped_column(ForeignKey("callback_plans.id"))
     scan_schedule_id: Mapped[int | None] = mapped_column(ForeignKey("scan_schedules.id"))
-    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    customer_name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
     script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id"), nullable=False)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(32), default="scheduled", nullable=False)
-    contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
-    # 入队时从联系人快照的拨号号码；号码变更不影响已入队任务。
+    # 入队时从负责人快照的拨号号码；号码变更不影响已入队任务。
     dial_number: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     # 扫描任务快照：business_service_id / device_id / scan_schedule_id /
     # rendered_script / due_date 等，供去重、追踪与话术回放。
@@ -158,11 +115,8 @@ class CallTask(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
-    plan: Mapped[CallbackPlan | None] = relationship(back_populates="call_tasks")
     scan_schedule: Mapped[ScanSchedule | None] = relationship(back_populates="tasks")
-    customer: Mapped[Customer] = relationship(back_populates="call_tasks")
     script: Mapped[Script] = relationship(back_populates="call_tasks")
-    contact: Mapped["Contact | None"] = relationship()
     call_record: Mapped["CallRecord | None"] = relationship(back_populates="task")
 
 
@@ -171,11 +125,9 @@ class CallRecord(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey("call_tasks.id"), unique=True)
-    plan_id: Mapped[int | None] = mapped_column(ForeignKey("callback_plans.id"))
-    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    customer_name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
     script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
-    contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
     dial_number: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     dialing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -185,10 +137,7 @@ class CallRecord(TimestampMixin, Base):
     operator_feedback: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     task: Mapped[CallTask | None] = relationship(back_populates="call_record")
-    plan: Mapped[CallbackPlan | None] = relationship(back_populates="call_records")
-    customer: Mapped[Customer] = relationship(back_populates="call_records")
     script: Mapped[Script] = relationship(back_populates="call_records")
-    contact: Mapped["Contact | None"] = relationship()
     events: Mapped[list["CallEvent"]] = relationship(
         back_populates="call_record", cascade="all, delete-orphan"
     )
@@ -315,47 +264,6 @@ class DictionaryItem(TimestampMixin, Base):
     category: Mapped[DictionaryCategory] = relationship(back_populates="items")
 
 
-class Contact(TimestampMixin, Base):
-    __tablename__ = "contacts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str | None] = mapped_column(String(120))
-    phone: Mapped[str | None] = mapped_column(String(32), index=True)
-    duty: Mapped[str] = mapped_column(String(64), default="", nullable=False)
-    notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-    customer_links: Mapped[list["CustomerContact"]] = relationship(
-        back_populates="contact", cascade="all, delete-orphan"
-    )
-
-
-class CustomerContact(TimestampMixin, Base):
-    """客户主体与负责人的关联；职责（含客户、发展人、客户经理、网络维护责任人）挂在关联上。"""
-
-    __tablename__ = "customer_contacts"
-    __table_args__ = (
-        UniqueConstraint(
-            "customer_id", "contact_id", "duty", name="uq_customer_contacts_link"
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    customer_id: Mapped[int] = mapped_column(
-        ForeignKey("customers.id"), nullable=False, index=True
-    )
-    contact_id: Mapped[int] = mapped_column(
-        ForeignKey("contacts.id"), nullable=False, index=True
-    )
-    duty: Mapped[str] = mapped_column(String(64), default="", nullable=False)
-    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-    customer: Mapped[Customer] = relationship(back_populates="contact_links")
-    contact: Mapped[Contact] = relationship(back_populates="customer_links")
-
-
 class BusinessService(TimestampMixin, Base):
     """业务实例：台账 A-M 列的规范化主体，业务号码为业务唯一键。"""
 
@@ -365,9 +273,11 @@ class BusinessService(TimestampMixin, Base):
     service_number: Mapped[str] = mapped_column(
         String(64), unique=True, nullable=False, index=True
     )
-    customer_id: Mapped[int] = mapped_column(
-        ForeignKey("customers.id"), nullable=False, index=True
-    )
+    customer_name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    developer_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    developer_phone: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    account_manager_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    account_manager_phone: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     county_item_id: Mapped[int | None] = mapped_column(ForeignKey("dictionary_items.id"))
     grid_item_id: Mapped[int | None] = mapped_column(ForeignKey("dictionary_items.id"))
     service_status_item_id: Mapped[int | None] = mapped_column(
@@ -386,7 +296,6 @@ class BusinessService(TimestampMixin, Base):
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    customer: Mapped[Customer] = relationship()
     devices: Mapped[list["NetworkDevice"]] = relationship(
         back_populates="business_service", cascade="all, delete-orphan"
     )
@@ -430,9 +339,8 @@ class NetworkDevice(TimestampMixin, Base):
     recovery_reason_item_id: Mapped[int | None] = mapped_column(
         ForeignKey("dictionary_items.id")
     )
-    maintenance_contact_id: Mapped[int | None] = mapped_column(
-        ForeignKey("customer_contacts.id")
-    )
+    maintenance_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    maintenance_phone: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -449,7 +357,6 @@ class NetworkDevice(TimestampMixin, Base):
     recovery_reason_item: Mapped["DictionaryItem | None"] = relationship(
         foreign_keys=[recovery_reason_item_id]
     )
-    maintenance_contact: Mapped["CustomerContact | None"] = relationship()
 
 
 class ChangeSet(TimestampMixin, Base):
@@ -643,4 +550,3 @@ class RolePermission(Base):
     domain: Mapped[str] = mapped_column(
         String(32), primary_key=True, default="system", nullable=False
     )
-

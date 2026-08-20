@@ -35,8 +35,6 @@ from .models import (
     CallRecord,
     CallTask,
     ChangeSet,
-    Contact,
-    Customer,
     BusinessService,
     DictionaryItem,
     ImportBatch,
@@ -135,7 +133,7 @@ SCAN_TYPE_LABELS = {
     "review_stuck": "审核卡单",
 }
 
-# 通知任务来源（CallTask.source）；历史 callback_plans 生成的任务仍为 scheduled。
+# 通知任务来源（CallTask.source）。
 SOURCE_LABELS = {
     "manual": "立即拨打",
     "due_renewal": "到期维系扫描",
@@ -512,12 +510,10 @@ def contacts_template(
     db: Session,
     error: str = "",
     form_data: dict[str, str] | None = None,
-    edit_contact: Contact | None = None,
+    edit_contact: object | None = None,
     status_code: int = 200,
 ):
-    contacts = db.scalars(
-        select(Contact).where(Contact.is_active.is_(True)).order_by(Contact.name.asc(), Contact.id.asc())
-    ).all()
+    contacts = []
     return render(
         request,
         "contacts.html",
@@ -542,7 +538,7 @@ def contacts_page(
     return contacts_template(
         request,
         db,
-        edit_contact=db.get(Contact, edit_id) if edit_id else None,
+        edit_contact=None,
         error=error,
     )
 
@@ -558,37 +554,20 @@ async def directory_contact_create(request: Request, db: Session = Depends(get_d
         return redirect_to(f"/contacts?error={quote('姓名和联系电话不能为空。')}")
     if not plan_service.validate_phone(phone):
         return redirect_to(f"/contacts?error={quote('电话格式不正确（应为 +?[0-9]{5,20}）。')}")
-    db.add(Contact(name=name, phone=phone, duty=duty))
-    db.commit()
+    # The contact directory was removed by the flat model; keep the legacy
+    # endpoint as a harmless compatibility redirect until the UI batch lands.
     return redirect_to("/contacts")
 
 
 @app.post("/contacts/{contact_id}/edit")
 async def contact_update(contact_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    contact = get_or_404(db, Contact, contact_id)
-    form = await request.form()
-    name = str(form.get("name", "")).strip()
-    phone = str(form.get("phone", "")).strip()
-    duty = str(form.get("duty", "")).strip()
-    if not name or not phone:
-        return redirect_to(f"/contacts?error={quote('姓名和联系电话不能为空。')}")
-    if phone and not plan_service.validate_phone(phone):
-        return redirect_to(f"/contacts?error={quote('电话格式不正确（应为 +?[0-9]{5,20}）。')}")
-    contact.name = name or None
-    contact.phone = phone or None
-    contact.duty = duty
-    contact.version += 1
-    db.commit()
     return redirect_to("/contacts")
 
 
 @app.post("/contacts/{contact_id}/delete")
 def contact_delete(contact_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    contact = get_or_404(db, Contact, contact_id)
-    contact.is_active = False
-    db.commit()
     return redirect_to("/contacts")
 
 
@@ -612,9 +591,7 @@ def ledger_template(
     query = select(BusinessService).where(BusinessService.is_active.is_(True))
     if q:
         like = f"%{q.strip()}%"
-        query = query.join(Customer, BusinessService.customer_id == Customer.id).where(
-            or_(BusinessService.service_number.ilike(like), Customer.name.ilike(like))
-        )
+        query = query.where(or_(BusinessService.service_number.ilike(like), BusinessService.customer_name.ilike(like)))
     if county_id:
         query = query.where(BusinessService.county_item_id == county_id)
     if grid_id:
@@ -643,7 +620,7 @@ def ledger_template(
             .group_by(NetworkDevice.business_service_id)
         ).all()
     )
-    customers = db.scalars(select(Customer).order_by(Customer.name.asc())).all()
+    customers = []
     return render(
         request,
         "ledger.html",
@@ -719,9 +696,8 @@ def _apply_service_form(service: BusinessService, data: dict, db: Session) -> st
     customer_name = data["customer_name"]
     if not customer_name:
         return "必须输入客户名称。"
-    customer = ledger_service.resolve_customer_by_name(db, customer_name)
     service.service_number = data["service_number"]
-    service.customer_id = customer.id
+    service.customer_name = customer_name
     service.county_item_id = _dictionary_value_id(db, "county", data["county"])
     service.grid_item_id = _dictionary_value_id(db, "grid", data["grid"])
     service.service_status_item_id = _dictionary_value_id(db, "service_status", data["service_status"])
@@ -741,7 +717,7 @@ async def service_create(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     try:
         data = _parse_service_form(form)
-        service = BusinessService(service_number="", customer_id=0)
+        service = BusinessService(service_number="")
         error = _apply_service_form(service, data, db)
     except ValueError as exc:
         return redirect_to(f"/ledger?error={quote(str(exc))}")
@@ -830,7 +806,7 @@ def devices_template(
         device_types=active_items(db, "device_type"),
         recovery_statuses=active_items(db, "recovery_status"),
         recovery_reasons=active_items(db, "recovery_reason"),
-        maintenance_contacts=ledger_service.contact_options(db),
+        maintenance_contacts=[],
         edit_device=edit_device,
         form_data=form_data or {},
         q=q,
@@ -870,7 +846,8 @@ def _parse_device_form(form) -> dict:
         "device_type": str(form.get("device_type", "")).strip(),
         "recovery_status": str(form.get("recovery_status", "")).strip(),
         "recovery_reason": str(form.get("recovery_reason", "")).strip(),
-        "maintenance_contact_id": _form_int(form, "maintenance_contact_id"),
+        "maintenance_name": str(form.get("maintenance_name", "")).strip(),
+        "maintenance_phone": str(form.get("maintenance_phone", "")).strip(),
         "vendor_model": str(form.get("vendor_model", "")).strip(),
         "location": str(form.get("location", "")).strip(),
         "asset_value": _form_float(form, "asset_value"),
@@ -891,7 +868,8 @@ def _apply_device_form(device: NetworkDevice, data: dict, db: Session) -> str | 
     device.device_type_item_id = _dictionary_value_id(db, "device_type", data["device_type"])
     device.recovery_status_item_id = _dictionary_value_id(db, "recovery_status", data["recovery_status"])
     device.recovery_reason_item_id = _dictionary_value_id(db, "recovery_reason", data["recovery_reason"])
-    device.maintenance_contact_id = data["maintenance_contact_id"]
+    device.maintenance_name = data["maintenance_name"]
+    device.maintenance_phone = data["maintenance_phone"]
     device.vendor_model = data["vendor_model"]
     device.location = data["location"]
     device.asset_value = data["asset_value"]
@@ -1213,7 +1191,7 @@ def import_detail(
         edit_raw = edit_payload.get("manual_raw", json.loads(edit_row.raw_json or "{}"))
         for field in ("入网时间", "协议到期时间"):
             edit_raw[field] = html_date_value(edit_raw.get(field, ""))
-    customers = db.scalars(select(Customer).where(Customer.is_active.is_(True)).order_by(Customer.name.asc())).all()
+    customers = []
     channel_options = [value for value in db.scalars(
         select(BusinessService.channel_name).where(BusinessService.channel_name != "").distinct().order_by(BusinessService.channel_name)
     ).all() if value]
@@ -1229,9 +1207,7 @@ def import_detail(
     asset_values = [str(value) for value in db.scalars(
         select(NetworkDevice.asset_value).where(NetworkDevice.asset_value.is_not(None)).distinct().order_by(NetworkDevice.asset_value)
     ).all() if value is not None]
-    directory_contacts = db.scalars(
-        select(Contact).where(Contact.is_active.is_(True)).order_by(Contact.name.asc(), Contact.id.asc())
-    ).all()
+    directory_contacts = []
     return render(
         request,
         "import_detail.html",
@@ -1417,7 +1393,7 @@ def build_ledger_export_workbook(db: Session):
         devices = [device for device in service.devices if device.is_active] or [None]
         for device in devices:
             ledger_sheet.append([
-                service.service_number, service.customer.name, service.county_item.label if service.county_item else "", service.grid_item.label if service.grid_item else "",
+                service.service_number, service.customer_name, service.county_item.label if service.county_item else "", service.grid_item.label if service.grid_item else "",
                 service.service_status_item.label if service.service_status_item else "", format_date(service.accessed_at), format_date(service.agreement_expires_at), service.business_type_item.label if service.business_type_item else "", service.channel_name,
                 "", "", "", "", "", "",
                 device.asset_class_item.label if device and device.asset_class_item else "", device.device_code if device else "", device.asset_value if device else "", device.device_type_item.label if device and device.device_type_item else "", device.vendor_model if device else "", device.location if device else "", device.recovery_status_item.label if device and device.recovery_status_item else "", device.recovery_reason_item.label if device and device.recovery_reason_item else "",
@@ -2237,7 +2213,7 @@ def calls_page(
     if status:
         query = query.where(CallRecord.status == status)
     if customer_id:
-        query = query.where(CallRecord.customer_id == customer_id)
+        query = query.where(CallRecord.customer_name == str(customer_id))
     if start_bound is not None:
         query = query.where(CallRecord.created_at >= start_bound)
     if end_bound is not None:
@@ -2261,7 +2237,7 @@ def calls_page(
         )
         .limit(50)
     ).all()
-    customers = db.scalars(select(Customer).order_by(Customer.name.asc())).all()
+    customers = []
     return render(
         request,
         "calls.html",

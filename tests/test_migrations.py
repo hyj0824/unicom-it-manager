@@ -18,12 +18,8 @@ EXPECTED_TABLES = {
     "call_events",
     "call_records",
     "call_tasks",
-    "callback_plans",
     "change_items",
     "change_sets",
-    "contacts",
-    "customer_contacts",
-    "customers",
     "dictionary_categories",
     "dictionary_items",
     "import_batches",
@@ -54,8 +50,8 @@ def test_upgrade_head_creates_full_schema_and_seeds(tmp_path: Path) -> None:
     engine = create_engine(url)
     tables = set(inspect(engine).get_table_names())
     assert EXPECTED_TABLES <= tables
-    assert "phone" not in {
-        col["name"] for col in inspect(engine).get_columns("customers")
+    assert {"customer_name", "account_manager_phone"} <= {
+        col["name"] for col in inspect(engine).get_columns("business_services")
     }
 
     with engine.connect() as conn:

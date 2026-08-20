@@ -175,10 +175,8 @@ class CallWorker:
         task.started_at = now
         record = task.call_record or CallRecord(
             task=task,
-            plan=task.plan,
-            customer=task.customer,
+            customer_name=task.customer_name,
             script=task.script,
-            contact=task.contact,
             dial_number=task.dial_number,
             status="dialing",
         )
@@ -199,10 +197,8 @@ class CallWorker:
         if record is None:
             record = CallRecord(
                 task=task,
-                plan=task.plan,
-                customer=task.customer,
+                customer_name=task.customer_name,
                 script=task.script,
-                contact=task.contact,
                 dial_number=task.dial_number,
                 status=task.status,
             )
@@ -536,10 +532,8 @@ class CallWorkerService:
             if record is None:
                 record = CallRecord(
                     task=task,
-                    plan=task.plan,
-                    customer=task.customer,
+                    customer_name=task.customer_name,
                     script=task.script,
-                    contact=task.contact,
                     dial_number=task.dial_number,
                     status=task.status,
                 )

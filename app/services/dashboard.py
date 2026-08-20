@@ -20,9 +20,6 @@ from ..models import (
     CallRecord,
     CallTask,
     ChangeSet,
-    Contact,
-    Customer,
-    CustomerContact,
     NetworkDevice,
     ScanSchedule,
     User,
@@ -130,17 +127,7 @@ def _due_service_count(db: Session, phone: str, global_scope: bool, now: datetim
         BusinessService.agreement_expires_at < end,
     )
     if not global_scope:
-        query = (
-            query.join(CustomerContact, CustomerContact.customer_id == BusinessService.customer_id)
-            .join(Contact, Contact.id == CustomerContact.contact_id)
-            .where(
-                CustomerContact.duty == "客户经理",
-                CustomerContact.is_active.is_(True),
-                Contact.is_active.is_(True),
-                Contact.phone == phone,
-            )
-        )
-        query = query.with_only_columns(func.count(distinct(BusinessService.id)))
+        query = query.where(BusinessService.account_manager_phone == phone)
         return int(db.scalar(query) or 0)
     return int(db.scalar(query) or 0)
 
@@ -155,7 +142,6 @@ def _device_count(db: Session, phone: str, global_scope: bool, now: datetime) ->
         .options(
             joinedload(NetworkDevice.business_service).joinedload(BusinessService.service_status_item),
             joinedload(NetworkDevice.recovery_status_item),
-            joinedload(NetworkDevice.maintenance_contact).joinedload(CustomerContact.contact),
         )
         .where(NetworkDevice.is_active.is_(True))
     ).all()
@@ -167,15 +153,7 @@ def _device_count(db: Session, phone: str, global_scope: bool, now: datetime) ->
         if global_scope:
             count += 1
             continue
-        link = device.maintenance_contact
-        if (
-            link
-            and link.is_active
-            and link.duty == "网络维护责任人"
-            and link.contact
-            and link.contact.is_active
-            and (link.contact.phone or "").strip() == phone
-        ):
+        if (device.maintenance_phone or "").strip() == phone:
             count += 1
     return count
 
@@ -289,7 +267,7 @@ def dashboard_data(db: Session, request, now: datetime | None = None) -> dict:
             db.scalar(select(func.count(NetworkDevice.id)).where(NetworkDevice.is_active.is_(True)))
             or 0
         ),
-        "customers": int(db.scalar(select(func.count(Customer.id))) or 0),
+        "customers": int(db.scalar(select(func.count(BusinessService.customer_name.distinct()))) or 0),
         "scan_schedules": int(db.scalar(select(func.count(ScanSchedule.id))) or 0),
         "records": int(db.scalar(select(func.count(CallRecord.id))) or 0),
     }
