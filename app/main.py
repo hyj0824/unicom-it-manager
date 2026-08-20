@@ -780,22 +780,6 @@ async def service_update(service_id: int, request: Request, db: Session = Depend
     return redirect_to("/ledger")
 
 
-@app.post("/ledger/{service_id}/delete")
-def service_delete(service_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_permission(db, request, "submit", "business")
-    service = get_or_404(db, BusinessService, service_id)
-    if service.devices:
-        return ledger_template(
-            request,
-            db,
-            f"该业务下有 {len(service.devices)} 台设备，请先处理设备关联，不能删除。",
-            status_code=400,
-        )
-    service.is_active = False
-    db.commit()
-    return redirect_to("/ledger")
-
-
 # ---------------------------------------------------------------- 网络设备
 
 
@@ -945,15 +929,6 @@ async def device_update(device_id: int, request: Request, db: Session = Depends(
         return redirect_to(f"/devices?error={quote(str(exc))}")
     if error:
         return redirect_to(f"/devices?error={quote(error)}")
-    db.commit()
-    return redirect_to("/devices")
-
-
-@app.post("/devices/{device_id}/delete")
-def device_delete(device_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_permission(db, request, "submit", "network")
-    device = get_or_404(db, NetworkDevice, device_id)
-    device.is_active = False
     db.commit()
     return redirect_to("/devices")
 

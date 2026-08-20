@@ -56,9 +56,6 @@
                         data-field-county="{{ service.county_item.label if service.county_item else '' }}" data-field-grid="{{ service.grid_item.label if service.grid_item else '' }}"
                         data-field-service_status="{{ service.service_status_item.label if service.service_status_item else '' }}" data-field-business_type="{{ service.business_type_item.label if service.business_type_item else '' }}"
                         data-field-channel_name="{{ service.channel_name }}" data-field-accessed_at="{{ service.accessed_at|date }}" data-field-agreement_expires_at="{{ service.agreement_expires_at|date }}">编辑</button>
-                <form method="post" action="/ledger/{{ service.id }}/delete" data-confirm="作废该业务？所属设备需先处理。">
-                  <button class="button danger small" type="submit">作废</button>
-                </form>
               {% endif %}</td>
             </tr>
           {% else %}

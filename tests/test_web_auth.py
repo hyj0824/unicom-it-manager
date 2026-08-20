@@ -304,7 +304,6 @@ def test_default_auditor_roles_can_read_but_not_directly_write_ledgers(
     assert 'data-edit-action="/ledger/' not in ledger.text
     assert client.post("/ledger", data={}, follow_redirects=False).status_code == 403
     assert client.post("/ledger/1/edit", data={}, follow_redirects=False).status_code == 403
-    assert client.post("/ledger/1/delete", data={}, follow_redirects=False).status_code == 403
     assert client.get("/devices").status_code == 403
 
     client.post("/logout")
@@ -322,7 +321,6 @@ def test_default_auditor_roles_can_read_but_not_directly_write_ledgers(
     assert 'data-edit-action="/devices/' not in devices.text
     assert client.post("/devices", data={}, follow_redirects=False).status_code == 403
     assert client.post("/devices/1/edit", data={}, follow_redirects=False).status_code == 403
-    assert client.post("/devices/1/delete", data={}, follow_redirects=False).status_code == 403
     assert client.get("/ledger").status_code == 403
 
 

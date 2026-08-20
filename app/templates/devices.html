@@ -37,7 +37,6 @@
                         data-field-recovery_status="{{ device.recovery_status_item.label if device.recovery_status_item else '' }}" data-field-recovery_reason="{{ device.recovery_reason_item.label if device.recovery_reason_item else '' }}"
                         data-field-maintenance_contact_search="{{ device.maintenance_contact.contact.name if device.maintenance_contact and device.maintenance_contact.contact else '' }}" data-field-maintenance_contact_id="{{ device.maintenance_contact_id or '' }}"
                         data-field-vendor_model="{{ device.vendor_model }}" data-field-location="{{ device.location }}" data-field-asset_value="{{ device.asset_value or '' }}">编辑</button>
-                <form method="post" action="/devices/{{ device.id }}/delete" data-confirm="作废该设备？"><button class="button danger small" type="submit">作废</button></form>
               {% endif %}</td>
             </tr>
           {% else %}<tr><td colspan="8" class="empty">暂无设备记录。</td></tr>{% endfor %}
