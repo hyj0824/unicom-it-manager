@@ -50,6 +50,7 @@ from .models import (
     utcnow,
 )
 from .scheduler import scheduler_service
+from .services import form_fields as form_field_service
 from .services import imports as import_service
 from .services import ledger as ledger_service
 from .services import reviews as review_service
@@ -1169,6 +1170,8 @@ def import_detail(
         import_columns=import_service.LEDGER_COLUMNS + import_service.TECHNICAL_COLUMNS,
         business_columns=import_service.BUSINESS_COLUMNS,
         device_columns=import_service.DEVICE_COLUMNS,
+        business_fields=form_field_service.BUSINESS_FIELDS,
+        device_fields=form_field_service.DEVICE_FIELDS,
         customer_names=customer_names,
         counties=active_items(db, "county"),
         grids=active_items(db, "grid"),

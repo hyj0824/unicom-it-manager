@@ -42,35 +42,26 @@
       <section class="correction-domain business-domain" data-correction-domain="business">
         <div class="domain-head"><h3>业务信息</h3><span class="domain-note">业务维护域</span></div>
         <div class="correction-grid">
-          <label data-correction-field="field-0"><span>号码</span><input name="号码" value="{{ edit_raw.get('号码', '') }}" required></label>
-          <label data-correction-field="field-1"><span>户名</span><input name="户名" list="customer-options" autocomplete="off" value="{{ edit_raw.get('户名', '') }}"></label>
-          <label data-correction-field="field-2"><span>县分</span><input class="dictionary-input" name="县分" list="county-options" autocomplete="off" value="{{ edit_raw.get('县分', '') }}"></label>
-          <label data-correction-field="field-3"><span>网格</span><input class="dictionary-input" name="网格" list="grid-options" autocomplete="off" value="{{ edit_raw.get('网格', '') }}"></label>
-          <label data-correction-field="field-4"><span>服务状态</span><input class="dictionary-input" name="服务状态" list="service-status-options" autocomplete="off" value="{{ edit_raw.get('服务状态', '') }}"></label>
-          <label data-correction-field="field-5"><span>入网时间</span><input type="date" data-import-date name="入网时间" value="{{ edit_raw.get('入网时间', '') }}"></label>
-          <label data-correction-field="field-6"><span>协议到期时间</span><input type="date" data-import-date name="协议到期时间" value="{{ edit_raw.get('协议到期时间', '') }}"></label>
-          <label data-correction-field="field-7"><span>业务类型</span><input class="dictionary-input" name="业务类型" list="business-type-options" autocomplete="off" value="{{ edit_raw.get('业务类型', '') }}"></label>
-          <label data-correction-field="field-8"><span>渠道名称</span><input class="dictionary-input" name="渠道名称" list="channel-options" autocomplete="off" value="{{ edit_raw.get('渠道名称', '') }}"></label>
-          <label data-correction-field="field-9"><span>发展人</span><input name="发展人" list="contact-name-options" autocomplete="off" value="{{ edit_raw.get('发展人', '') }}"></label>
-          <label data-correction-field="field-10"><span>发展人联系电话</span><input name="发展人联系电话" list="contact-phone-options" autocomplete="off" value="{{ edit_raw.get('发展人联系电话', '') }}"></label>
-          <label data-correction-field="field-11"><span>客户经理</span><input name="客户经理" list="contact-name-options" autocomplete="off" value="{{ edit_raw.get('客户经理', '') }}"></label>
-          <label data-correction-field="field-12"><span>客户经理联系电话</span><input name="客户经理联系电话" list="contact-phone-options" autocomplete="off" value="{{ edit_raw.get('客户经理联系电话', '') }}"></label>
+          {% for field in business_fields %}
+          <label data-correction-field="field-{{ loop.index0 }}"><span>{{ field.column }}</span>
+            {% if field.type == 'date' %}<input type="date" data-import-date name="{{ field.column }}" value="{{ edit_raw.get(field.column, '') }}">
+            {% else %}<input class="dictionary-input" name="{{ field.column }}"{% if field.datalist %} list="{{ field.datalist }}"{% endif %} autocomplete="off" value="{{ edit_raw.get(field.column, '') }}"{% if field.required %} required{% endif %}{% if field.inputmode %} inputmode="{{ field.inputmode }}"{% endif %}>
+            {% endif %}
+          </label>
+          {% endfor %}
         </div>
       </section>
 
       <section class="correction-domain device-domain" data-correction-domain="device">
         <div class="domain-head"><h3>设备信息</h3><span class="domain-note">网络维护域</span></div>
         <div class="correction-grid">
-          <label data-correction-field="device-0"><span>网络维护责任人</span><input name="网络维护责任人" list="contact-name-options" autocomplete="off" value="{{ edit_raw.get('网络维护责任人', '') }}"></label>
-          <label data-correction-field="device-1"><span>网络维护责任人联系电话</span><input name="网络维护责任人联系电话" list="contact-phone-options" autocomplete="off" value="{{ edit_raw.get('网络维护责任人联系电话', '') }}"></label>
-          <label data-correction-field="device-2"><span>设备属性</span><input class="dictionary-input" name="设备属性" list="asset-class-options" autocomplete="off" value="{{ edit_raw.get('设备属性', '') }}"></label>
-          <label data-correction-field="device-3"><span>设备编码</span><input class="dictionary-input" name="设备编码" list="device-code-options" autocomplete="off" value="{{ edit_raw.get('设备编码', '') }}"></label>
-          <label data-correction-field="device-4"><span>资产原值或物资购置价格</span><input class="dictionary-input" inputmode="decimal" name="资产原值或物资购置价格" list="asset-value-options" autocomplete="off" value="{{ edit_raw.get('资产原值或物资购置价格', '') }}"></label>
-          <label data-correction-field="device-5"><span>设备及物资类型</span><input class="dictionary-input" name="设备及物资类型" list="device-type-options" autocomplete="off" value="{{ edit_raw.get('设备及物资类型', '') }}"></label>
-          <label data-correction-field="device-6"><span>设备厂家+型号</span><input class="dictionary-input" name="设备厂家+型号" list="vendor-model-options" autocomplete="off" value="{{ edit_raw.get('设备厂家+型号', '') }}"></label>
-          <label data-correction-field="device-7"><span>设备放置地点</span><input class="dictionary-input" name="设备放置地点" list="device-location-options" autocomplete="off" value="{{ edit_raw.get('设备放置地点', '') }}"></label>
-          <label data-correction-field="device-8"><span>设备是否已回收</span><input class="dictionary-input" name="设备是否已回收" list="recovery-status-options" autocomplete="off" value="{{ edit_raw.get('设备是否已回收', '') }}"></label>
-          <label data-correction-field="device-9"><span>设备未回收原因</span><input class="dictionary-input" name="设备未回收原因" list="recovery-reason-options" autocomplete="off" value="{{ edit_raw.get('设备未回收原因', '') }}"></label>
+          {% for field in device_fields %}
+          <label data-correction-field="device-{{ loop.index0 }}"><span>{{ field.column }}</span>
+            {% if field.type == 'number' %}<input class="dictionary-input" inputmode="decimal" name="{{ field.column }}"{% if field.datalist %} list="{{ field.datalist }}"{% endif %} autocomplete="off" value="{{ edit_raw.get(field.column, '') }}">
+            {% else %}<input class="dictionary-input" name="{{ field.column }}"{% if field.datalist %} list="{{ field.datalist }}"{% endif %} autocomplete="off" value="{{ edit_raw.get(field.column, '') }}"{% if field.required %} required{% endif %}{% if field.inputmode %} inputmode="{{ field.inputmode }}"{% endif %}>
+            {% endif %}
+          </label>
+          {% endfor %}
         </div>
       </section>
 
