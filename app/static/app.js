@@ -124,21 +124,6 @@ document.querySelectorAll(".dictionary-input[list]").forEach((input) => {
   input.addEventListener("focus", refreshSuggestions);
 });
 
-const correctionPicker = document.querySelector("[data-correction-picker]");
-if (correctionPicker) {
-  const fields = Array.from(document.querySelectorAll("[data-correction-field]"));
-  correctionPicker.addEventListener("change", () => {
-    const selected = correctionPicker.value;
-    fields.forEach((field) => {
-      field.hidden = selected !== "all" && field.dataset.correctionField !== selected;
-    });
-    if (selected !== "all") {
-      const input = document.querySelector(`[data-correction-field="${CSS.escape(selected)}"] input`);
-      input?.focus();
-    }
-  });
-}
-
 document.querySelectorAll("[data-import-date]").forEach((input) => {
   const raw = input.value.trim();
   if (/^\d{8}$/.test(raw)) {

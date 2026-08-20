@@ -39,22 +39,6 @@
       <a class="button ghost small" href="/imports/{{ batch.id }}">取消</a>
     </div>
     <form method="post" action="/imports/{{ batch.id }}/rows/{{ edit_row.id }}/correct" class="correction-form">
-      <div class="correction-toolbar">
-        <label class="field-picker">
-          <span>选择字段</span>
-          <select data-correction-picker>
-            <option value="all">显示全部字段</option>
-            <optgroup label="业务字段">
-              {% for column in business_columns %}<option value="field-{{ loop.index0 }}">{{ column }}</option>{% endfor %}
-            </optgroup>
-            <optgroup label="设备字段">
-              {% for column in device_columns %}<option value="device-{{ loop.index0 }}">{{ column }}</option>{% endfor %}
-            </optgroup>
-          </select>
-        </label>
-        <p class="subtle">字典字段支持输入自定义值，也可键入关键词从候选项中模糊搜索。</p>
-      </div>
-
       <section class="correction-domain business-domain" data-correction-domain="business">
         <div class="domain-head"><h3>业务信息</h3><span class="domain-note">业务维护域</span></div>
         <div class="correction-grid">
