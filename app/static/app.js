@@ -79,8 +79,10 @@ function bindLookup(input) {
   const hidden = document.getElementById(input.dataset.lookupTarget);
   if (!list || !hidden) return;
   const sync = () => {
+    // 只在候选列表中精确匹配时才同步隐藏 ID；输入自定义值或纯数字不视为 ID
+    // （曾把不存在的数字直接当 ID 提交，导致新增业务 500 FK 错误）。
     const option = Array.from(list.options).find((item) => item.value === input.value.trim());
-    hidden.value = option?.dataset.id || (/^\d+$/.test(input.value.trim()) ? input.value.trim() : "");
+    hidden.value = option?.dataset.id || "";
   };
   input.addEventListener("input", sync);
   input.addEventListener("change", sync);

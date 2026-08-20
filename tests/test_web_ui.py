@@ -1039,3 +1039,33 @@ def test_ledger_and_devices_validation_errors_redirect_to_list(client: TestClien
     assert device_resp.status_code == 303
     assert "error=" in device_resp.headers["location"]
     assert "设备编码不能为空" in client.get(device_resp.headers["location"]).text
+
+
+def test_ledger_and_devices_reject_nonexistent_foreign_ids(client: TestClient) -> None:
+    """前端 datalist 只提交真实 ID；伪造/不存在的 ID 必须被服务端拒绝而不是 FK 500。"""
+    login(client)
+    resp = client.post(
+        "/ledger",
+        data={
+            "service_number": "GHOST-001",
+            "customer_id": "999999",
+            "county": "",
+            "grid": "",
+            "service_status": "",
+            "business_type": "",
+            "channel_name": "",
+            "accessed_at": "",
+            "agreement_expires_at": "",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "所选客户不存在" in client.get(resp.headers["location"]).text
+
+    device_resp = client.post(
+        "/devices",
+        data={"device_code": "GHOST-DEV-001", "business_service_id": "999999"},
+        follow_redirects=False,
+    )
+    assert device_resp.status_code == 303
+    assert "所选业务不存在" in client.get(device_resp.headers["location"]).text

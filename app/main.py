@@ -706,6 +706,9 @@ def _apply_service_form(service: BusinessService, data: dict, db: Session) -> st
         return error
     if data["customer_id"] is None:
         return "必须选择客户。"
+    if db.get(Customer, data["customer_id"]) is None:
+        # 前端只提交候选列表中的真实 ID；不存在的 ID 直接拒绝，避免 FK 500。
+        return "所选客户不存在，请从候选列表中选择。"
     service.service_number = data["service_number"]
     service.customer_id = data["customer_id"]
     service.county_item_id = _dictionary_value_id(db, "county", data["county"])
@@ -882,6 +885,8 @@ def _apply_device_form(device: NetworkDevice, data: dict, db: Session) -> str | 
         return error
     if data["business_service_id"] is None:
         return "必须选择所属业务。"
+    if db.get(BusinessService, data["business_service_id"]) is None:
+        return "所选业务不存在，请从候选列表中选择。"
     device.device_code = data["device_code"]
     device.business_service_id = data["business_service_id"]
     device.asset_class_item_id = _dictionary_value_id(db, "asset_class", data["asset_class"])
