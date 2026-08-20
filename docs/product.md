@@ -34,27 +34,27 @@ Excel 是交换来源，不是最终数据库结构。数据分为三层：
 更新。导入和 `/daily-renewals`、`/daily-recycles` 已遵守该链路；`/ledger`、`/devices` 仍保留直接录入
 表单，是“编辑草稿再提交”落地前的已知例外。
 
-### 2.2 客户、联系人和扫描
+### 2.2 客户、负责人与扫描
 
-- `customers` 保存客户主体。客户名称不是业务实例唯一键；客户随台账导入审核应用自动创建，
-  业务录入时直接填写客户名称也会按名复用或自动创建（与字典字段同一交互语义）。
-- `contacts` 是独立通讯录，保存姓名、电话、职责和有效状态。
-- `customer_contacts` 保存客户主体与联系人的职责关联和导入追溯关系，不是通讯录录入入口。职责包括发展人、客户经理、网络维护责任人和客户；通知扫描只选择相应的工作人员职责。
-- `scan_schedules` 取代手动 `callback_plans`，支持 `due_renewal`、`device_recycle`、`review_stuck` 三类扫描、cron、时区、提前天数、启停、话术和短信开关。
-- `callback_plans` 仅为历史追溯保留，无页面入口。
-- `call_tasks` 保留可空的历史 `plan_id`，并包含 `scan_schedule_id`、`source` 和
-  `meta_json`。`source` 区分 `due_renewal`、`device_recycle`、`review_stuck`、
-  `manual`、`scheduled`；`meta_json` 保存业务/设备目标、扫描配置和渲染话术
-  快照，用于同日去重和追踪。
+- 客户与负责人**不设独立实体表**（2026-08 扁平化）：客户名称、发展人、客户经理
+  直接作为 `business_services` 的字段（`customer_name`、`developer_name`、
+  `developer_phone`、`account_manager_name`、`account_manager_phone`）；网络维护
+  责任人作为 `network_devices` 字段（`maintenance_name`、`maintenance_phone`）。
+  业务录入弹窗可直接填写（新客户名自动创建语义随导入应用一致）。
+- 扫描通知按业务/设备字段找通知对象：到期维系读客户经理电话，设备回收读设备
+  维护责任人电话；无电话时跳过并记日志。
+- `scan_schedules` 支持 `due_renewal`、`device_recycle`、`review_stuck` 三类扫描、cron、时区、提前天数、启停、话术和短信开关。
+- `call_tasks` 包含 `scan_schedule_id`、`source` 和 `meta_json`；入队时快照
+  `customer_name` 与 `dial_number`。`source` 区分 `due_renewal`、`device_recycle`、
+  `review_stuck`、`manual`、`scheduled`。
 
 三类扫描按“同日同目标”去重。续签、退网申请从「客户维系登记」提交，设备
-回收申请从「设备回收登记」提交；既有 POST 路径继续使用 `/due-work` 前缀
-（历史路径兼容），审核应用后相应扫描窗口自然失效。
+回收申请从「设备回收登记」提交；审核应用后相应扫描窗口自然失效。
 
 ### 2.3 业务与设备
 
-- `business_services` 是业务实例，业务号码 `service_number` 唯一；关联 `customers`，保存县分、网格、服务状态、入网时间、协议到期时间、业务类型、渠道、来源行、数据质量、版本和启用状态。
-- `network_devices` 与业务实例是一对多关系，`device_code` 全局唯一；保存资产类别/价值、设备类型、厂商型号、位置、回收状态/原因、网络维护联系人、版本和启用状态。
+- `business_services` 是业务实例，业务号码 `service_number` 唯一；保存客户名称、发展人/客户经理姓名电话、县分、网格、服务状态、入网时间、协议到期时间、业务类型、渠道、来源行、数据质量、版本和启用状态。
+- `network_devices` 与业务实例是一对多关系，`device_code` 全局唯一；保存资产类别/价值、设备类型、厂商型号、位置、回收状态/原因、维护责任人姓名/电话、版本和启用状态。
 - 字典表保存县分、网格、业务类型、服务状态、设备属性、设备类型、回收状态和回收原因等可停用枚举，避免同义词泛滥。
 
 ### 2.4 用户、变更与审计
@@ -119,7 +119,7 @@ Excel 是交换来源，不是最终数据库结构。数据分为三层：
 - 本地 CSS 和少量原生 JavaScript，无 CDN；深色侧边栏包含工作台，以及数据
   管理、日常运维、回访与通话、系统管理四个清晰分组。
 - 工作台展示待审核、缺项总数、到期业务、我的最近通知和全局图表。
-- 业务台账、网络设备、通讯录、话术、扫描通知、审核中心、导入
+- 业务台账、网络设备、话术、扫描通知、审核中心、导入
   导出、客户维系登记、设备回收登记、通话记录、短信通知、系统监控、备份与
   灾备、用户管理和角色权限页面均有入口。
 - 业务台账支持业务号码/客户名称搜索和县分、服务状态筛选；网络设备支持设备
