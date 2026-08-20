@@ -31,12 +31,11 @@
           </details>
           {% endif %}
           {% if can_read_business or can_read_network or can_review_any or can_import %}
-          <details class="nav-section" {% if path.startswith('/ledger') or path.startswith('/devices') or path.startswith('/reviews') or path.startswith('/missing') or path.startswith('/imports') or path.startswith('/exports') %}open{% endif %}>
+          <details class="nav-section" {% if path.startswith('/ledger') or path.startswith('/devices') or path.startswith('/reviews') or path.startswith('/imports') or path.startswith('/exports') %}open{% endif %}>
             <summary>数据管理</summary>
             {% if can_read_business %}<a class="{% if path.startswith('/ledger') %}active{% endif %}" href="/ledger">业务台账</a>{% endif %}
             {% if can_read_network %}<a class="{% if path.startswith('/devices') %}active{% endif %}" href="/devices">网络设备</a>{% endif %}
             {% if can_review_any %}<a class="{% if path.startswith('/reviews') %}active{% endif %}" href="/reviews">审核中心</a>{% endif %}
-            {% if can_read_business or can_read_network %}<a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>{% endif %}
             {% if can_import %}<a class="{% if path.startswith('/imports') or path.startswith('/exports') %}active{% endif %}" href="/imports">导入导出</a>{% endif %}
           </details>
           {% endif %}

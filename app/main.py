@@ -1102,32 +1102,6 @@ async def due_work_recover(device_id: int, request: Request, db: Session = Depen
     return redirect_to(f"/reviews/{change_set.id}")
 
 
-# ---------------------------------------------------------------- 缺项工作台
-
-
-@app.get("/missing")
-def missing_page(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
-    if not (auth.has_permission(db, request, "read", "business") or auth.has_permission(db, request, "read", "network")):
-        raise HTTPException(status_code=403, detail="当前账号没有此操作权限。")
-    business_rows = ledger_service.business_missing_fields(db)
-    device_rows = ledger_service.device_missing_fields(db)
-    recent_batches = db.scalars(
-        select(ImportBatch)
-        .where(ImportBatch.missing_count > 0)
-        .order_by(ImportBatch.created_at.desc())
-        .limit(10)
-    ).all()
-    return render(
-        request,
-        "missing.html",
-        db,
-        business_rows=business_rows,
-        device_rows=device_rows,
-        recent_batches=recent_batches,
-    )
-
-
 # ---------------------------------------------------------------- 导入导出
 
 

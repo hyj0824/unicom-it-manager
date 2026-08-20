@@ -207,7 +207,7 @@ def test_domain_read_permissions_gate_pages_and_navigation(client: TestClient, w
     assert response.status_code == 303
     for path in ["/contacts", "/scan-schedules", "/scripts", "/calls", "/sms"]:
         assert client.get(path).status_code == 200, path
-    for path in ["/ledger", "/devices", "/daily-renewals", "/daily-recycles", "/missing"]:
+    for path in ["/ledger", "/devices", "/daily-renewals", "/daily-recycles"]:
         assert client.get(path).status_code == 403, path
 
     page = client.get("/contacts")
@@ -442,7 +442,6 @@ def test_login_redirects_and_pages_render(client: TestClient) -> None:
         "/ledger",
         "/devices",
         "/reviews",
-        "/missing",
         "/admin/users",
         "/admin/roles",
         "/admin/system",

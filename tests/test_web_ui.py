@@ -956,7 +956,6 @@ def test_navigation_groups_data_management_and_daily_operations(client: TestClie
         'href="/ledger">业务台账',
         'href="/devices">网络设备',
         'href="/reviews">审核中心',
-        'href="/missing">缺项工作台',
         'href="/imports">导入导出',
     ]
     assert all(link in data_section for link in expected_links)
