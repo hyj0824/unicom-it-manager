@@ -23,7 +23,7 @@ import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import Settings
 from app.database import SessionLocal, engine
@@ -998,7 +998,7 @@ def test_ledger_is_paginated_and_uses_modal_lookup_controls(client: TestClient) 
     assert "共 51 条" in page1.text
     assert 'data-modal-open="ledger-modal"' in page1.text
     assert 'list="customer-options"' in page1.text
-    assert 'name="customer_id"' in page1.text
+    assert 'name="customer_name"' in page1.text
     page2 = client.get("/ledger", params={"q": "LEDGER", "page": 2})
     assert "第 2 / 2 页" in page2.text
     assert "LEDGER-000" in page2.text
@@ -1030,7 +1030,7 @@ def test_devices_is_paginated_and_uses_modal_lookup_controls(client: TestClient)
 
 def test_ledger_and_devices_validation_errors_redirect_to_list(client: TestClient) -> None:
     login(client)
-    ledger_resp = client.post("/ledger", data={"service_number": "", "customer_id": ""}, follow_redirects=False)
+    ledger_resp = client.post("/ledger", data={"service_number": "", "customer_name": ""}, follow_redirects=False)
     assert ledger_resp.status_code == 303
     assert "error=" in ledger_resp.headers["location"]
     assert "业务号码不能为空" in client.get(ledger_resp.headers["location"]).text
@@ -1041,14 +1041,15 @@ def test_ledger_and_devices_validation_errors_redirect_to_list(client: TestClien
     assert "设备编码不能为空" in client.get(device_resp.headers["location"]).text
 
 
-def test_ledger_and_devices_reject_nonexistent_foreign_ids(client: TestClient) -> None:
-    """前端 datalist 只提交真实 ID；伪造/不存在的 ID 必须被服务端拒绝而不是 FK 500。"""
+def test_ledger_creates_or_reuses_customer_by_name(client: TestClient) -> None:
+    """客户字段与字典字段一致：直接填文本，按名称复用或自动创建，不再提交隐藏 ID。"""
     login(client)
+    # 新客户名 → 自动创建客户并成功建业务。
     resp = client.post(
         "/ledger",
         data={
             "service_number": "GHOST-001",
-            "customer_id": "999999",
+            "customer_name": "安康市新客户公司",
             "county": "",
             "grid": "",
             "service_status": "",
@@ -1060,8 +1061,52 @@ def test_ledger_and_devices_reject_nonexistent_foreign_ids(client: TestClient) -
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert "所选客户不存在" in client.get(resp.headers["location"]).text
+    assert resp.headers["location"] == "/ledger"
+    with SessionLocal() as session:
+        customer = session.scalars(
+            select(Customer).where(Customer.name == "安康市新客户公司")
+        ).first()
+        assert customer is not None
+        service = session.scalars(
+            select(BusinessService).where(BusinessService.service_number == "GHOST-001")
+        ).first()
+        assert service is not None and service.customer_id == customer.id
 
+    # 同名（大小写不同）→ 复用同一客户，不重复创建。
+    resp = client.post(
+        "/ledger",
+        data={
+            "service_number": "GHOST-002",
+            "customer_name": "安康市新客户公司 ",
+            "county": "",
+            "grid": "",
+            "service_status": "",
+            "business_type": "",
+            "channel_name": "",
+            "accessed_at": "",
+            "agreement_expires_at": "",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    with SessionLocal() as session:
+        assert session.scalars(
+            select(func.count(Customer.id)).where(Customer.name == "安康市新客户公司")
+        ).one() == 1
+
+    # 客户名称为空 → 明确错误。
+    resp = client.post(
+        "/ledger",
+        data={"service_number": "GHOST-003", "customer_name": ""},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "必须输入客户名称" in client.get(resp.headers["location"]).text
+
+
+def test_devices_reject_nonexistent_business_id(client: TestClient) -> None:
+    """设备必须选真实业务；伪造 ID 被拒绝而不是 FK 500。"""
+    login(client)
     device_resp = client.post(
         "/devices",
         data={"device_code": "GHOST-DEV-001", "business_service_id": "999999"},

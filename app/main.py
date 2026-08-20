@@ -683,7 +683,7 @@ def ledger_page(
 def _parse_service_form(form) -> dict:
     return {
         "service_number": str(form.get("service_number", "")).strip(),
-        "customer_id": _form_int(form, "customer_id"),
+        "customer_name": str(form.get("customer_name", "")).strip(),
         "county": str(form.get("county", "")).strip(),
         "grid": str(form.get("grid", "")).strip(),
         "service_status": str(form.get("service_status", "")).strip(),
@@ -704,13 +704,12 @@ def _apply_service_form(service: BusinessService, data: dict, db: Session) -> st
     )
     if error:
         return error
-    if data["customer_id"] is None:
-        return "必须选择客户。"
-    if db.get(Customer, data["customer_id"]) is None:
-        # 前端只提交候选列表中的真实 ID；不存在的 ID 直接拒绝，避免 FK 500。
-        return "所选客户不存在，请从候选列表中选择。"
+    customer_name = data["customer_name"]
+    if not customer_name:
+        return "必须输入客户名称。"
+    customer = ledger_service.resolve_customer_by_name(db, customer_name)
     service.service_number = data["service_number"]
-    service.customer_id = data["customer_id"]
+    service.customer_id = customer.id
     service.county_item_id = _dictionary_value_id(db, "county", data["county"])
     service.grid_item_id = _dictionary_value_id(db, "grid", data["grid"])
     service.service_status_item_id = _dictionary_value_id(db, "service_status", data["service_status"])
@@ -730,9 +729,7 @@ async def service_create(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     try:
         data = _parse_service_form(form)
-        service = BusinessService(
-            service_number="", customer_id=data["customer_id"] or 0
-        )
+        service = BusinessService(service_number="", customer_id=0)
         error = _apply_service_form(service, data, db)
     except ValueError as exc:
         return redirect_to(f"/ledger?error={quote(str(exc))}")

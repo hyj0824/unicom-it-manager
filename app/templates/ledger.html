@@ -51,7 +51,7 @@
               <td>{{ service.agreement_expires_at|date or "-" }}</td>
               <td class="actions">{% if can('submit', 'business') %}
                 <button class="button secondary small" type="button" data-modal-open="ledger-modal" data-modal-title="编辑业务" data-edit-action="/ledger/{{ service.id }}/edit"
-                        data-field-service_number="{{ service.service_number }}" data-field-customer_search="{{ service.customer.name }}" data-field-customer_id="{{ service.customer_id }}"
+                        data-field-service_number="{{ service.service_number }}" data-field-customer_name="{{ service.customer.name }}"
                         data-field-county="{{ service.county_item.label if service.county_item else '' }}" data-field-grid="{{ service.grid_item.label if service.grid_item else '' }}"
                         data-field-service_status="{{ service.service_status_item.label if service.service_status_item else '' }}" data-field-business_type="{{ service.business_type_item.label if service.business_type_item else '' }}"
                         data-field-channel_name="{{ service.channel_name }}" data-field-accessed_at="{{ service.accessed_at|date }}" data-field-agreement_expires_at="{{ service.agreement_expires_at|date }}">编辑</button>
@@ -90,8 +90,7 @@
       <form class="stack" method="post" action="{{ '/ledger/' ~ edit_service.id ~ '/edit' if edit_service else '/ledger' }}" data-modal-form data-default-action="/ledger">
         <label>业务号码<input name="service_number" data-modal-field="service_number" value="{{ fd.get('service_number', edit_service.service_number if edit_service else '') }}" required></label>
         <label>客户
-          <input name="customer_search" data-modal-field="customer_search" list="customer-options" data-lookup-target="ledger-customer-id" autocomplete="off" value="{{ selected_customer.name if selected_customer else '' }}" placeholder="输入或搜索客户名称" required>
-          <input type="hidden" id="ledger-customer-id" name="customer_id" data-modal-field="customer_id" value="{{ edit_service.customer_id if edit_service else '' }}">
+          <input name="customer_name" data-modal-field="customer_name" list="customer-options" autocomplete="off" value="{{ selected_customer.name if selected_customer else '' }}" placeholder="输入或搜索客户名称（新名称将自动创建客户）" required>
         </label>
         <div class="grid two">
           <label>县分<input class="dictionary-input" name="county" data-modal-field="county" list="county-options" autocomplete="off" value="{{ fd.get('county', edit_service.county_item.label if edit_service and edit_service.county_item else '') }}" placeholder="输入或搜索县分"></label>

@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import AuditLog, BusinessService, CustomerContact, NetworkDevice
+from ..models import AuditLog, BusinessService, Customer, CustomerContact, NetworkDevice
 from .plans import get_zone
 
 
@@ -97,6 +97,33 @@ def device_missing_fields(db: Session) -> list[dict[str, object]]:
         if count:
             rows.append({"entity": "设备", "field": label, "count": count})
     return rows
+
+
+def resolve_customer_by_name(db: Session, name: str) -> Customer:
+    """按名称解析客户主体：启用客户中不区分大小写精确匹配则复用，否则创建。
+
+    与导入应用链路的按名称创建语义一致（reviews._get_customer），手动录入
+    与导入不会产生重复客户主体；调用方在事务内负责提交/回滚。
+    """
+    label = " ".join(name.split())
+    if not label:
+        raise ValueError("客户名称不能为空。")
+    if len(label) > 120:
+        raise ValueError("客户名称不能超过 120 个字符。")
+    customer = db.scalars(
+        select(Customer)
+        .where(
+            Customer.is_active.is_(True),
+            func.lower(Customer.name) == label.casefold(),
+        )
+        .limit(1)
+    ).first()
+    if customer is not None:
+        return customer
+    customer = Customer(name=label)
+    db.add(customer)
+    db.flush()
+    return customer
 
 
 def contact_options(db: Session) -> list[CustomerContact]:
