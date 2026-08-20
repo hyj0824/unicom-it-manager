@@ -909,7 +909,7 @@ def test_daily_operations_pages_and_existing_submit_routes(client: TestClient) -
     renew_page = client.get("/daily-renewals")
     assert renew_page.status_code == 200
     assert "客户维系登记" in renew_page.text
-    assert "提前 21 天" in renew_page.text
+    assert "今天起 21 天内" in renew_page.text
     assert "DAILY-RENEW-001" in renew_page.text
     assert "DAILY-DEVICE-001" not in renew_page.text
     assert f'/due-work/business/{due_service_id}/renew' in renew_page.text

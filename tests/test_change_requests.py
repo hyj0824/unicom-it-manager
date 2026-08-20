@@ -497,7 +497,7 @@ def test_due_work_requires_login_and_lists_window(web_client) -> None:
     assert response.status_code == 200
     assert "848DIAWEB1001" in response.text
     assert "848DIAWEB1002" not in response.text
-    assert "提前 14 天" in response.text  # 无扫描配置时使用默认提前天数
+    assert "今天起 14 天内" in response.text  # 无扫描配置时使用默认提前天数
     assert service_id
 
 
