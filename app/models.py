@@ -574,7 +574,7 @@ class StagingRow(Base):
 
 
 class User(TimestampMixin, Base):
-    """用户账号：只能由超级管理员创建；未绑定角色与数据范围前没有业务数据权限。
+    """用户账号：由具备 system/manage_users 的账号创建并按角色授权。
 
     `real_name` / `phone` 用于按步骤通知对应负责人；系统管理员可不设手机。
     """
@@ -588,6 +588,7 @@ class User(TimestampMixin, Base):
     phone: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # 兼容已有数据库列；认证层不再使用它授予权限，唯一全权限主体为内置 admin。
     is_superadmin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # 台账导入应用时按职责自动创建的账号；管理员可重置密码。
     auto_provisioned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -642,5 +643,4 @@ class RolePermission(Base):
     domain: Mapped[str] = mapped_column(
         String(32), primary_key=True, default="system", nullable=False
     )
-
 

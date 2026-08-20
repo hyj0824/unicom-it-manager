@@ -10,7 +10,7 @@
         <h2>业务台账</h2>
         <span class="subtle">共 {{ total }} 条业务记录</span>
       </div>
-      <button class="button primary" type="button" data-modal-open="ledger-modal" data-modal-title="新增业务">新增业务</button>
+      {% if can('submit', 'business') %}<button class="button primary" type="button" data-modal-open="ledger-modal" data-modal-title="新增业务">新增业务</button>{% endif %}
     </div>
     <form class="filter-bar" method="get" action="/ledger">
       <input name="q" value="{{ q }}" placeholder="业务号码 / 客户名称" aria-label="搜索业务">
@@ -49,7 +49,7 @@
               <td>{{ service.business_type_item.label if service.business_type_item else "-" }}</td>
               <td>{{ service.accessed_at|date or "-" }}</td>
               <td>{{ service.agreement_expires_at|date or "-" }}</td>
-              <td class="actions">
+              <td class="actions">{% if can('submit', 'business') %}
                 <button class="button secondary small" type="button" data-modal-open="ledger-modal" data-modal-title="编辑业务" data-edit-action="/ledger/{{ service.id }}/edit"
                         data-field-service_number="{{ service.service_number }}" data-field-customer_search="{{ service.customer.name }}" data-field-customer_id="{{ service.customer_id }}"
                         data-field-county="{{ service.county_item.label if service.county_item else '' }}" data-field-grid="{{ service.grid_item.label if service.grid_item else '' }}"
@@ -58,7 +58,7 @@
                 <form method="post" action="/ledger/{{ service.id }}/delete" data-confirm="作废该业务？所属设备需先处理。">
                   <button class="button danger small" type="submit">作废</button>
                 </form>
-              </td>
+              {% endif %}</td>
             </tr>
           {% else %}
             <tr><td colspan="9" class="empty">暂无业务记录。</td></tr>
@@ -83,7 +83,7 @@
   <datalist id="business-type-options">{% for item in business_types %}<option value="{{ item.label }}" data-id="{{ item.id }}"></option>{% endfor %}</datalist>
   <datalist id="customer-options">{% for customer in customers %}<option value="{{ customer.name }}" data-id="{{ customer.id }}"></option>{% endfor %}</datalist>
 
-  <div class="modal" id="ledger-modal" role="dialog" aria-modal="true" aria-labelledby="ledger-modal-title"{% if edit_service %} data-modal-auto-open="true"{% endif %}>
+  {% if can('submit', 'business') %}<div class="modal" id="ledger-modal" role="dialog" aria-modal="true" aria-labelledby="ledger-modal-title"{% if edit_service %} data-modal-auto-open="true"{% endif %}>
     <div class="modal-backdrop" data-modal-close></div>
     <section class="modal-dialog">
       <div class="panel-head"><h2 id="ledger-modal-title">{{ "编辑业务" if edit_service else "新增业务" }}</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
@@ -105,5 +105,5 @@
         <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
       </form>
     </section>
-  </div>
+  </div>{% endif %}
 {% endblock %}

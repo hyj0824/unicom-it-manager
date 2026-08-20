@@ -38,7 +38,7 @@
             <td>{{ task.source|source_label }}</td>
             <td class="log-cell">{{ task.error_message or "-" }}</td>
             <td class="actions">
-              {% if task.status not in ["queued", "dialing", "connected"] %}
+              {% if can('call_now', 'callback') and task.status not in ["queued", "dialing", "connected"] %}
                 <form method="post" action="/tasks/{{ task.id }}/requeue"
                       data-confirm="重新入队后该任务会再次拨号（{{ task.dial_number }}），确认继续？">
                   <input type="hidden" name="next" value="/calls">

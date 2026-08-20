@@ -9,7 +9,7 @@
         <h2>运维负责人通讯录</h2>
         <span class="subtle">共 {{ contacts|length }} 位有效联系人</span>
       </div>
-      <button class="button primary" type="button" data-modal-open="contacts-modal" data-modal-title="新增通讯录人员">新增人员</button>
+      {% if can('submit', 'callback') %}<button class="button primary" type="button" data-modal-open="contacts-modal" data-modal-title="新增通讯录人员">新增人员</button>{% endif %}
     </div>
     <div class="table-wrap">
       <table>
@@ -20,7 +20,7 @@
               <td>{{ contact.name or "-" }}</td>
               <td class="mono">{{ contact.phone or "-" }}</td>
               <td>{{ contact.duty or "未指定" }}</td>
-              <td class="actions">
+              <td class="actions">{% if can('submit', 'callback') %}
                 <button class="button secondary small" type="button" data-modal-open="contacts-modal" data-modal-title="编辑通讯录人员"
                         data-edit-action="/contacts/{{ contact.id }}/edit"
                         data-field-name="{{ contact.name or '' }}" data-field-phone="{{ contact.phone or '' }}"
@@ -28,7 +28,7 @@
                 <form method="post" action="/contacts/{{ contact.id }}/delete" data-confirm="停用该通讯录人员？">
                   <button class="button danger small" type="submit">停用</button>
                 </form>
-              </td>
+              {% endif %}</td>
             </tr>
           {% else %}
             <tr><td colspan="4" class="empty">通讯录暂无人员。</td></tr>
@@ -42,7 +42,7 @@
     {% for duty in duties %}<option value="{{ duty.label }}"></option>{% endfor %}
   </datalist>
 
-  <div class="modal" id="contacts-modal" role="dialog" aria-modal="true" aria-labelledby="contacts-modal-title"{% if edit_contact %} data-modal-auto-open="true"{% endif %}>
+  {% if can('submit', 'callback') %}<div class="modal" id="contacts-modal" role="dialog" aria-modal="true" aria-labelledby="contacts-modal-title"{% if edit_contact %} data-modal-auto-open="true"{% endif %}>
     <div class="modal-backdrop" data-modal-close></div>
     <section class="modal-dialog">
       <div class="panel-head"><h2 id="contacts-modal-title">{{ "编辑通讯录人员" if edit_contact else "新增通讯录人员" }}</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
@@ -53,5 +53,5 @@
         <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
       </form>
     </section>
-  </div>
+  </div>{% endif %}
 {% endblock %}

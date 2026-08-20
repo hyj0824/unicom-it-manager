@@ -291,10 +291,16 @@ def context(request: Request, db: Session | None = None, **extra):
         "scheduler_enabled": True,
         "settings": settings,
         "app_title": APP_TITLE,
+        "can": lambda permission, domain: False,
     }
     if db is not None:
         ensure_default_settings(db)
         data["scheduler_enabled"] = is_scheduler_enabled(db)
+        # Product baseline section 3: templates use the same domain permission
+        # check as routes so unavailable operations are not rendered as controls.
+        data["can"] = lambda permission, domain: auth.has_permission(
+            db, request, permission, domain
+        )
     data.update(extra)
     return data
 
@@ -426,9 +432,9 @@ def logout_submit(request: Request):
 
 
 @app.get("/password-change")
-def password_change_page(request: Request):
+def password_change_page(request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
-    return render(request, "password_change.html")
+    return render(request, "password_change.html", db)
 
 
 @app.post("/password-change")
@@ -532,7 +538,7 @@ def contacts_page(
     error: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "callback")
     return contacts_template(
         request,
         db,
@@ -543,7 +549,7 @@ def contacts_page(
 
 @app.post("/contacts")
 async def directory_contact_create(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     form = await request.form()
     name = str(form.get("name", "")).strip()
     phone = str(form.get("phone", "")).strip()
@@ -559,7 +565,7 @@ async def directory_contact_create(request: Request, db: Session = Depends(get_d
 
 @app.post("/contacts/{contact_id}/edit")
 async def contact_update(contact_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     contact = get_or_404(db, Contact, contact_id)
     form = await request.form()
     name = str(form.get("name", "")).strip()
@@ -579,7 +585,7 @@ async def contact_update(contact_id: int, request: Request, db: Session = Depend
 
 @app.post("/contacts/{contact_id}/delete")
 def contact_delete(contact_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     contact = get_or_404(db, Contact, contact_id)
     contact.is_active = False
     db.commit()
@@ -665,7 +671,7 @@ def ledger_page(
     error: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "business")
     edit_service = db.get(BusinessService, edit_id) if edit_id else None
     return ledger_template(
         request, db, edit_service=edit_service, q=q,
@@ -715,7 +721,9 @@ def _apply_service_form(service: BusinessService, data: dict, db: Session) -> st
 
 @app.post("/ledger")
 async def service_create(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    # Product baseline section 2.1 retains this direct-entry exception; section
+    # 3 therefore requires the business-domain submit permission to write it.
+    auth.require_permission(db, request, "submit", "business")
     form = await request.form()
     try:
         data = _parse_service_form(form)
@@ -740,7 +748,7 @@ async def service_create(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/ledger/{service_id}/edit")
 async def service_update(service_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "business")
     service = get_or_404(db, BusinessService, service_id)
     form = await request.form()
     try:
@@ -762,7 +770,7 @@ async def service_update(service_id: int, request: Request, db: Session = Depend
 
 @app.post("/ledger/{service_id}/delete")
 def service_delete(service_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "business")
     service = get_or_404(db, BusinessService, service_id)
     if service.devices:
         return ledger_template(
@@ -845,7 +853,7 @@ def devices_page(
     error: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "network")
     edit_device = db.get(NetworkDevice, edit_id) if edit_id else None
     return devices_template(
         request, db, edit_device=edit_device, q=q, recovery_status_id=recovery_status_id,
@@ -890,7 +898,8 @@ def _apply_device_form(device: NetworkDevice, data: dict, db: Session) -> str | 
 
 @app.post("/devices")
 async def device_create(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    # See product baseline sections 2.1 and 3, matching the business ledger.
+    auth.require_permission(db, request, "submit", "network")
     form = await request.form()
     try:
         data = _parse_device_form(form)
@@ -907,7 +916,7 @@ async def device_create(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/devices/{device_id}/edit")
 async def device_update(device_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "network")
     device = get_or_404(db, NetworkDevice, device_id)
     form = await request.form()
     try:
@@ -923,7 +932,7 @@ async def device_update(device_id: int, request: Request, db: Session = Depends(
 
 @app.post("/devices/{device_id}/delete")
 def device_delete(device_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "network")
     device = get_or_404(db, NetworkDevice, device_id)
     device.is_active = False
     db.commit()
@@ -936,6 +945,8 @@ def device_delete(device_id: int, request: Request, db: Session = Depends(get_db
 @app.get("/reviews")
 def reviews_page(request: Request, status_filter: str = "", db: Session = Depends(get_db)):
     auth.require_login(request)
+    if not any(auth.has_permission(db, request, "read", domain) for domain in ("business", "network", "callback", "template", "system")):
+        raise HTTPException(status_code=403, detail="当前账号没有此操作权限。")
     query = select(ChangeSet).order_by(ChangeSet.created_at.desc()).limit(200)
     allowed_domains = [domain for domain in ("business", "network", "callback", "template", "system") if auth.has_permission(db, request, "read", domain)]
     if allowed_domains:
@@ -1002,7 +1013,7 @@ def due_work_page(
     notice: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "business")
     if type == "renew":
         return due_work_template(
             request, db, error=error, notice=notice, page_type="renew"
@@ -1019,7 +1030,7 @@ def daily_recycles_page(
     notice: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "network")
     return due_work_template(
         request, db, error=error, notice=notice, page_type="recycle"
     )
@@ -1101,6 +1112,8 @@ async def due_work_recover(device_id: int, request: Request, db: Session = Depen
 @app.get("/missing")
 def missing_page(request: Request, db: Session = Depends(get_db)):
     auth.require_login(request)
+    if not (auth.has_permission(db, request, "read", "business") or auth.has_permission(db, request, "read", "network")):
+        raise HTTPException(status_code=403, detail="当前账号没有此操作权限。")
     business_rows = ledger_service.business_missing_fields(db)
     device_rows = ledger_service.device_missing_fields(db)
     recent_batches = db.scalars(
@@ -1602,7 +1615,11 @@ def admin_backup_download(filename: str, request: Request, db: Session = Depends
 @app.get("/admin/users")
 def admin_users_page(request: Request, edit_id: int | None = None, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "manage_users", "system")
-    return _users_page(request, db, edit_user=db.get(User, edit_id) if edit_id else None)
+    edit_user = db.get(User, edit_id) if edit_id else None
+    # The built-in admin identity is not a database user-management target.
+    if edit_user is not None and edit_user.is_superadmin:
+        edit_user = None
+    return _users_page(request, db, edit_user=edit_user)
 
 
 def _users_page(
@@ -1635,12 +1652,17 @@ def _users_page(
     )
 
 
+def _roles_allow_blank_phone(db: Session, role_ids: list[int]) -> bool:
+    return bool(role_ids) and db.scalar(
+        select(Role.id).where(Role.id.in_(role_ids), Role.code == "system_admin")
+    ) is not None
+
+
 @app.post("/admin/users")
 async def admin_user_create(request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "manage_users", "system")
     form = await request.form()
     username = str(form.get("username", "")).strip()
-    display_name = str(form.get("display_name", "")).strip()
     real_name = str(form.get("real_name", "")).strip()
     phone = str(form.get("phone", "")).strip()
     password = str(form.get("password", ""))
@@ -1648,12 +1670,13 @@ async def admin_user_create(request: Request, db: Session = Depends(get_db)):
     enabled = str(form.get("enabled", "")) == "on"
     if not username or not password:
         return _users_page(request, db, error="用户名和初始密码必填。", status_code=400)
-    error = validate_user_profile(real_name, phone)
+    error = validate_user_profile(
+        real_name, phone, allow_blank_phone=_roles_allow_blank_phone(db, role_ids)
+    )
     if error:
         return _users_page(request, db, error=error, status_code=400)
     user = User(
         username=username,
-        display_name=display_name,
         real_name=real_name,
         phone=phone,
         password_hash=hash_password(password),
@@ -1681,17 +1704,20 @@ async def admin_user_create(request: Request, db: Session = Depends(get_db)):
 async def admin_user_update(user_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "manage_users", "system")
     user = get_or_404(db, User, user_id)
+    if user.is_superadmin:
+        raise HTTPException(status_code=403, detail="内置管理员账号只读，不能编辑。")
     form = await request.form()
     real_name = str(form.get("real_name", "")).strip()
     phone = str(form.get("phone", "")).strip()
-    error = validate_user_profile(real_name, phone, is_superadmin=user.is_superadmin)
+    role_ids = [int(v) for v in form.getlist("role_ids")]
+    error = validate_user_profile(
+        real_name, phone, allow_blank_phone=_roles_allow_blank_phone(db, role_ids)
+    )
     if error:
         return _users_page(request, db, error=error, edit_user=user, status_code=400)
     user.real_name = real_name
     user.phone = phone
-    user.display_name = str(form.get("display_name", "")).strip()
     user.is_enabled = str(form.get("enabled", "")) == "on"
-    role_ids = [int(v) for v in form.getlist("role_ids")]
     set_user_roles(db, user, role_ids)
     db.commit()
     ledger_service.log_action(
@@ -1707,6 +1733,8 @@ async def admin_user_update(user_id: int, request: Request, db: Session = Depend
 async def admin_user_password(user_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "manage_users", "system")
     user = get_or_404(db, User, user_id)
+    if user.is_superadmin:
+        raise HTTPException(status_code=403, detail="内置管理员账号只读，不能重置密码。")
     form = await request.form()
     password = str(form.get("password", ""))
     if len(password) < 8:
@@ -1888,14 +1916,14 @@ def scripts_page(
     error: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "callback")
     edit_script = db.get(Script, edit_id) if edit_id else None
     return scripts_template(request, db, edit_script=edit_script, notice=notice, error=error)
 
 
 @app.post("/scripts")
 async def script_create(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     form = await request.form()
     title = str(form.get("title", "")).strip()
     body = str(form.get("body", "")).strip()
@@ -1917,7 +1945,7 @@ async def script_create(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/scripts/{script_id}/edit")
 async def script_update(script_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     script = get_or_404(db, Script, script_id)
     form = await request.form()
     title = str(form.get("title", "")).strip()
@@ -1937,7 +1965,7 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
 
 @app.post("/scripts/{script_id}/delete")
 def script_delete(script_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     script = get_or_404(db, Script, script_id)
     refs = script_referencing_counts(db, script)
     if any(refs.values()):
@@ -1972,7 +2000,7 @@ def script_delete(script_id: int, request: Request, db: Session = Depends(get_db
 
 @app.post("/scripts/{script_id}/generate-audio")
 def script_generate_audio(script_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     script = get_or_404(db, Script, script_id)
     message = generate_script_audio(db, script, settings)
     db.commit()
@@ -1980,9 +2008,9 @@ def script_generate_audio(script_id: int, request: Request, db: Session = Depend
 
 
 @app.get("/audio/{filename:path}")
-def script_audio_file(filename: str, request: Request):
+def script_audio_file(filename: str, request: Request, db: Session = Depends(get_db)):
     """只读话术音频：仅服务 data/audio/ 下的 WAV/MP3，需登录，防路径穿越。"""
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "callback")
     path = resolve_audio_file(filename)
     if path is None:
         raise HTTPException(status_code=404)
@@ -2065,7 +2093,7 @@ def scan_schedules_page(
     error: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "callback")
     edit_schedule = db.get(ScanSchedule, edit_id) if edit_id else None
     return scan_schedules_template(
         request,
@@ -2078,7 +2106,7 @@ def scan_schedules_page(
 
 @app.post("/scan-schedules")
 async def scan_schedule_create(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     form = await request.form()
     try:
         data = _parse_scan_schedule_form(db, form)
@@ -2091,7 +2119,7 @@ async def scan_schedule_create(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/scan-schedules/{schedule_id}/edit")
 async def scan_schedule_update(schedule_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     schedule = get_or_404(db, ScanSchedule, schedule_id)
     form = await request.form()
     try:
@@ -2107,7 +2135,7 @@ async def scan_schedule_update(schedule_id: int, request: Request, db: Session =
 
 @app.post("/scan-schedules/{schedule_id}/delete")
 def scan_schedule_delete(schedule_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     schedule = get_or_404(db, ScanSchedule, schedule_id)
     # SQLite 默认不强制外键，显式检查引用，避免删除仍被任务引用的配置。
     task_refs = db.scalar(
@@ -2136,7 +2164,7 @@ def scan_schedule_delete(schedule_id: int, request: Request, db: Session = Depen
 
 @app.post("/scan-schedules/{schedule_id}/toggle")
 def scan_schedule_toggle(schedule_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "submit", "callback")
     schedule = get_or_404(db, ScanSchedule, schedule_id)
     schedule.enabled = not schedule.enabled
     db.commit()
@@ -2150,7 +2178,7 @@ SMS_PAGE_LIMIT = 200
 
 @app.get("/sms")
 def sms_page(request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "callback")
     records = db.scalars(
         select(SmsNotification)
         .order_by(SmsNotification.id.desc())
@@ -2202,7 +2230,7 @@ def calls_page(
     notice: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "callback")
     invalid_filter = ""
     try:
         start_bound = _date_filter_bound(date_from, True)
@@ -2269,7 +2297,7 @@ def call_detail(
     notice: str = "",
     db: Session = Depends(get_db),
 ):
-    auth.require_login(request)
+    auth.require_permission(db, request, "read", "callback")
     record = get_or_404(db, CallRecord, record_id)
     events = db.scalars(
         select(CallEvent)
@@ -2291,7 +2319,8 @@ def call_detail(
 async def task_requeue(task_id: int, request: Request, db: Session = Depends(get_db)):
     """人工重新入队：把终态任务重置为 queued，不新建任务、不改动原计划。"""
 
-    auth.require_login(request)
+    # Product baseline section 3 reserves manual re-dial for `call_now`.
+    auth.require_permission(db, request, "call_now", "callback")
     task = get_or_404(db, CallTask, task_id)
     form = await request.form()
     next_url = str(form.get("next", "/calls"))
@@ -2313,7 +2342,7 @@ async def task_requeue(task_id: int, request: Request, db: Session = Depends(get
 
 @app.post("/calls/{record_id}/feedback")
 async def call_feedback(record_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_login(request)
+    auth.require_permission(db, request, "update_draft", "callback")
     record = get_or_404(db, CallRecord, record_id)
     form = await request.form()
     record.operator_feedback = str(form.get("operator_feedback", "")).strip()

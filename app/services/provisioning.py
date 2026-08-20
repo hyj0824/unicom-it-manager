@@ -47,7 +47,6 @@ def _provision_user(db: Session, name: str, phone: str, role_code: str) -> bool:
         username=phone,
         real_name=name or phone,
         phone=phone,
-        display_name=name or phone,
         password_hash=hash_password(secrets.token_urlsafe(9)),
         is_enabled=True,
         is_superadmin=False,

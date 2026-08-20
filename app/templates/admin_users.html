@@ -19,17 +19,13 @@
           </label>
         {% endif %}
         <label>
-          实名
+          实名（页面展示名称）
           <input name="real_name" required value="{{ edit_user.real_name if edit_user else '' }}">
         </label>
         <label>
           手机
           <input name="phone" value="{{ edit_user.phone if edit_user else '' }}" inputmode="tel" autocomplete="tel" placeholder="+?[0-9]{5,20}">
-          <span class="subtle">系统管理员可不填；5-20 位数字，可带 + 前缀国际区号。</span>
-        </label>
-        <label>
-          显示名称
-          <input name="display_name" value="{{ edit_user.display_name if edit_user else '' }}">
+          <span class="subtle">系统管理员角色可不填；5-20 位数字，可带 + 前缀国际区号。</span>
         </label>
         <label>
           角色（多选）
@@ -66,24 +62,23 @@
       <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>用户名</th><th>实名</th><th>手机</th><th>显示名称</th><th>角色</th><th>账号来源</th><th>改密状态</th><th>状态</th><th>最近登录</th><th class="actions-col">操作</th></tr>
+          <tr><th>用户名</th><th>实名</th><th>手机</th><th>角色</th><th>账号来源</th><th>改密状态</th><th>状态</th><th>最近登录</th><th class="actions-col">操作</th></tr>
         </thead>
         <tbody>
           {% for user in users %}
             <tr>
-              <td class="mono">{{ user.username }}{% if user.is_superadmin %} <span class="status-pill muted">超管</span>{% endif %}</td>
-              <td>{{ user.real_name or "-" }}</td>
+              <td class="mono">{{ user.username }}</td>
+              <td>{{ user.real_name or user.username }}</td>
               <td class="mono">{{ user.phone or "-" }}</td>
-              <td>{{ user.display_name or "-" }}</td>
               <td>{% for name in role_name_map.get(user.id, []) %}<span class="status-pill muted">{{ name }}</span> {% endfor %}</td>
               <td>{% if user.auto_provisioned %}<span class="status-pill muted" title="由台账导入审核应用自动创建，初始密码随机生成">自动建号</span>{% else %}-{% endif %}</td>
               <td>{% if user.force_password_change %}<span class="status-pill warning" title="登录后必须先修改初始密码">需改密</span>{% else %}-{% endif %}</td>
               <td><span class="status-pill {% if user.is_enabled %}ok{% else %}muted{% endif %}">{{ "启用" if user.is_enabled else "停用" }}</span></td>
               <td>{{ user.last_login_at|dt or "-" }}</td>
-              <td class="actions"><a class="button secondary small" href="/admin/users?edit_id={{ user.id }}">编辑</a></td>
+              <td class="actions">{% if not user.is_superadmin %}<a class="button secondary small" href="/admin/users?edit_id={{ user.id }}">编辑</a>{% else %}<span class="subtle">内置管理员只读</span>{% endif %}</td>
             </tr>
           {% else %}
-            <tr><td colspan="10" class="empty">暂无用户。用户只能由管理员创建。</td></tr>
+            <tr><td colspan="9" class="empty">暂无用户。用户只能由管理员创建。</td></tr>
           {% endfor %}
         </tbody>
       </table>

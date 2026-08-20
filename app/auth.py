@@ -43,9 +43,8 @@ def has_permission(db: Session, request: Request, permission: str, domain: str) 
     user_id = principal.get("id")
     if not isinstance(user_id, int):
         return False
-    user = db.get(User, user_id)
-    if user is not None and user.is_superadmin:
-        return True
+    # Product baseline section 3: only the built-in admin account is the
+    # unrestricted administrator; database users receive permissions by role.
     return db.scalar(
         select(RolePermission.role_id)
         .join(UserRole, UserRole.role_id == RolePermission.role_id)
@@ -73,9 +72,8 @@ def is_system_admin(db: Session, request: Request) -> bool:
     user_id = principal.get("id")
     if not isinstance(user_id, int):
         return False
-    user = db.get(User, user_id)
-    if user is not None and user.is_superadmin:
-        return True
+    # `system_admin` is a normal preset role.  It may perform system-admin
+    # workflow exceptions, but it is not a second super administrator.
     return db.scalar(
         select(Role.id)
         .join(UserRole, UserRole.role_id == Role.id)
@@ -99,7 +97,7 @@ def verify_credentials(db: Session, username: str, password: str) -> dict | None
         return None
     if not user.password_hash or not verify_password(password, user.password_hash):
         return None
-    return {"type": "user", "id": user.id, "name": user.display_name or user.username}
+    return {"type": "user", "id": user.id, "name": user.real_name or user.username}
 
 
 def login(request: Request, principal: dict) -> None:

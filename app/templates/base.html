@@ -17,19 +17,30 @@
         </div>
         <nav class="nav" aria-label="主导航">
           <a class="{% if path == '/' %}active{% endif %}" href="/">工作台</a>
+          {% set can_read_business = can('read', 'business') %}
+          {% set can_read_network = can('read', 'network') %}
+          {% set can_read_callback = can('read', 'callback') %}
+          {% set can_review_any = can('read', 'business') or can('read', 'network') or can('read', 'callback') or can('read', 'template') or can('read', 'system') %}
+          {% set can_import = can('import', 'system') %}
+          {% set can_manage_system = can('manage_users', 'system') or can('manage_config', 'system') %}
+          {% if can_read_business or can_read_network or can_review_any or can_import %}
           <details class="nav-section" {% if path.startswith('/ledger') or path.startswith('/devices') or path.startswith('/reviews') or path.startswith('/missing') or path.startswith('/imports') or path.startswith('/exports') %}open{% endif %}>
             <summary>数据管理</summary>
-            <a class="{% if path.startswith('/ledger') %}active{% endif %}" href="/ledger">业务台账</a>
-            <a class="{% if path.startswith('/devices') %}active{% endif %}" href="/devices">网络设备</a>
-            <a class="{% if path.startswith('/reviews') %}active{% endif %}" href="/reviews">审核中心</a>
-            <a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>
-            <a class="{% if path.startswith('/imports') or path.startswith('/exports') %}active{% endif %}" href="/imports">导入导出</a>
+            {% if can_read_business %}<a class="{% if path.startswith('/ledger') %}active{% endif %}" href="/ledger">业务台账</a>{% endif %}
+            {% if can_read_network %}<a class="{% if path.startswith('/devices') %}active{% endif %}" href="/devices">网络设备</a>{% endif %}
+            {% if can_review_any %}<a class="{% if path.startswith('/reviews') %}active{% endif %}" href="/reviews">审核中心</a>{% endif %}
+            {% if can_read_business or can_read_network %}<a class="{% if path.startswith('/missing') %}active{% endif %}" href="/missing">缺项工作台</a>{% endif %}
+            {% if can_import %}<a class="{% if path.startswith('/imports') or path.startswith('/exports') %}active{% endif %}" href="/imports">导入导出</a>{% endif %}
           </details>
+          {% endif %}
+          {% if can_read_business or can_read_network %}
           <details class="nav-section" {% if path.startswith('/due-work') or path.startswith('/daily-recycles') %}open{% endif %}>
             <summary>日常运维</summary>
-            <a class="{% if path.startswith('/due-work') %}active{% endif %}" href="/due-work?type=renew">客户维系登记</a>
-            <a class="{% if path.startswith('/daily-recycles') %}active{% endif %}" href="/daily-recycles">设备回收登记</a>
+            {% if can_read_business %}<a class="{% if path.startswith('/due-work') %}active{% endif %}" href="/due-work?type=renew">客户维系登记</a>{% endif %}
+            {% if can_read_network %}<a class="{% if path.startswith('/daily-recycles') %}active{% endif %}" href="/daily-recycles">设备回收登记</a>{% endif %}
           </details>
+          {% endif %}
+          {% if can_read_callback %}
           <details class="nav-section" {% if path.startswith('/contacts') or path.startswith('/scan-schedules') or path.startswith('/scripts') or path.startswith('/calls') or path.startswith('/sms') %}open{% endif %}>
             <summary>回访与通话</summary>
             <a class="{% if path.startswith('/contacts') %}active{% endif %}" href="/contacts">通讯录</a>
@@ -38,13 +49,16 @@
             <a class="{% if path.startswith('/calls') %}active{% endif %}" href="/calls">通话记录</a>
             <a class="{% if path.startswith('/sms') %}active{% endif %}" href="/sms">短信通知</a>
           </details>
+          {% endif %}
+          {% if can_manage_system %}
           <details class="nav-section" {% if path.startswith('/admin') %}open{% endif %}>
             <summary>系统管理</summary>
-            <a class="{% if path.startswith('/admin/system') %}active{% endif %}" href="/admin/system">系统监控</a>
-            <a class="{% if path.startswith('/admin/backups') %}active{% endif %}" href="/admin/backups">备份与灾备</a>
-            <a class="{% if path.startswith('/admin/users') %}active{% endif %}" href="/admin/users">用户管理</a>
-            <a class="{% if path.startswith('/admin/roles') %}active{% endif %}" href="/admin/roles">角色权限</a>
+            {% if can('manage_config', 'system') %}<a class="{% if path.startswith('/admin/system') %}active{% endif %}" href="/admin/system">系统监控</a>{% endif %}
+            {% if can('manage_config', 'system') %}<a class="{% if path.startswith('/admin/backups') %}active{% endif %}" href="/admin/backups">备份与灾备</a>{% endif %}
+            {% if can('manage_users', 'system') %}<a class="{% if path.startswith('/admin/users') %}active{% endif %}" href="/admin/users">用户管理</a>{% endif %}
+            {% if can('manage_users', 'system') %}<a class="{% if path.startswith('/admin/roles') %}active{% endif %}" href="/admin/roles">角色权限</a>{% endif %}
           </details>
+          {% endif %}
         </nav>
       </aside>
       <main class="shell">

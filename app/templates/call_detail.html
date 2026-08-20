@@ -46,7 +46,7 @@
         {% endif %}
         <dt>重拨操作</dt>
         <dd>
-          {% if record.task and record.task.status not in ["queued", "dialing", "connected"] %}
+          {% if can('call_now', 'callback') and record.task and record.task.status not in ["queued", "dialing", "connected"] %}
             <form method="post" action="/tasks/{{ record.task.id }}/requeue"
                   data-confirm="重新入队后该任务会再次拨号（{{ record.dial_number }}），确认继续？">
               <input type="hidden" name="next" value="/calls/{{ record.id }}">
@@ -62,13 +62,13 @@
     <div class="panel-head">
       <h2>操作员回访结果</h2>
     </div>
-    <form class="stack" method="post" action="/calls/{{ record.id }}/feedback">
+    {% if can('update_draft', 'callback') %}<form class="stack" method="post" action="/calls/{{ record.id }}/feedback">
       <label>
         回访反馈
         <textarea name="operator_feedback" rows="6">{{ record.operator_feedback }}</textarea>
       </label>
       <button class="button primary" type="submit">保存反馈</button>
-    </form>
+    </form>{% endif %}
   </section>
 
   <section class="panel">

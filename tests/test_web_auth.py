@@ -161,6 +161,193 @@ def test_system_read_permission_only_allows_monitor_logs(client: TestClient, web
     assert client.get("/admin/users").status_code == 403
 
 
+def _grant_domain_permissions(db, user: User, grants: list[tuple[str, str]]) -> None:
+    role = Role(
+        code=f"test-role-{user.username}",
+        name=f"测试角色-{user.username}",
+        description="权限审计测试",
+    )
+    db.add(role)
+    db.flush()
+    permissions = {
+        permission.code: permission
+        for permission in db.scalars(select(Permission)).all()
+    }
+    for code, domain in grants:
+        db.add(
+            RolePermission(
+                role_id=role.id,
+                permission_id=permissions[code].id,
+                domain=domain,
+            )
+        )
+    db.add(UserRole(user_id=user.id, role_id=role.id))
+
+
+def test_domain_read_permissions_gate_pages_and_navigation(client: TestClient, webdb) -> None:
+    with webdb() as db:
+        user = User(
+            username="callback-reader",
+            real_name="回访只读人员",
+            phone="13800000001",
+            password_hash=hash_password("callback-password"),
+            is_enabled=True,
+        )
+        db.add(user)
+        db.flush()
+        _grant_domain_permissions(db, user, [("read", "callback")])
+        db.commit()
+
+    response = client.post(
+        "/login",
+        data={"username": "callback-reader", "password": "callback-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    for path in ["/contacts", "/scan-schedules", "/scripts", "/calls", "/sms"]:
+        assert client.get(path).status_code == 200, path
+    for path in ["/ledger", "/devices", "/due-work?type=renew", "/daily-recycles", "/missing"]:
+        assert client.get(path).status_code == 403, path
+
+    page = client.get("/contacts")
+    assert "回访只读人员" in page.text
+    assert 'href="/contacts"' in page.text
+    assert 'href="/ledger"' not in page.text
+    assert 'href="/admin/users"' not in page.text
+    assert "新增人员" not in page.text
+    assert "编辑通讯录人员" not in page.text
+
+    for path in ["/contacts", "/scripts", "/scan-schedules", "/tasks/1/requeue", "/calls/1/feedback"]:
+        assert client.post(path, data={}, follow_redirects=False).status_code == 403, path
+
+
+def test_callback_write_permissions_are_independent(client: TestClient, webdb) -> None:
+    with webdb() as db:
+        user = User(
+            username="callback-operator",
+            real_name="回访操作员",
+            phone="13800000002",
+            password_hash=hash_password("operator-password"),
+            is_enabled=True,
+        )
+        db.add(user)
+        db.flush()
+        _grant_domain_permissions(
+            db,
+            user,
+            [
+                ("read", "callback"),
+                ("submit", "callback"),
+                ("update_draft", "callback"),
+                ("call_now", "callback"),
+            ],
+        )
+        db.commit()
+
+    client.post(
+        "/login",
+        data={"username": "callback-operator", "password": "operator-password"},
+        follow_redirects=False,
+    )
+    assert client.post(
+        "/contacts", data={"name": "联系人", "phone": "13800000003"}, follow_redirects=False
+    ).status_code == 303
+    assert client.post(
+        "/scripts", data={"title": "回访话术", "body": "正文"}, follow_redirects=False
+    ).status_code == 303
+
+
+def test_default_auditor_roles_can_read_but_not_directly_write_ledgers(
+    client: TestClient, webdb
+) -> None:
+    with webdb() as db:
+        business_user = User(
+            username="business-auditor-user",
+            real_name="业务稽核员",
+            phone="13800000005",
+            password_hash=hash_password("business-auditor-password"),
+            is_enabled=True,
+        )
+        network_user = User(
+            username="network-auditor-user",
+            real_name="网络稽核员",
+            phone="13800000006",
+            password_hash=hash_password("network-auditor-password"),
+            is_enabled=True,
+        )
+        db.add_all([business_user, network_user])
+        db.flush()
+        business_role = db.scalar(select(Role).where(Role.code == "business_auditor"))
+        network_role = db.scalar(select(Role).where(Role.code == "network_auditor"))
+        assert business_role is not None
+        assert network_role is not None
+        db.add_all(
+            [
+                UserRole(user_id=business_user.id, role_id=business_role.id),
+                UserRole(user_id=network_user.id, role_id=network_role.id),
+            ]
+        )
+        db.commit()
+
+    client.post(
+        "/login",
+        data={
+            "username": "business-auditor-user",
+            "password": "business-auditor-password",
+        },
+        follow_redirects=False,
+    )
+    ledger = client.get("/ledger")
+    assert ledger.status_code == 200
+    assert "新增业务" not in ledger.text
+    assert 'data-edit-action="/ledger/' not in ledger.text
+    assert client.post("/ledger", data={}, follow_redirects=False).status_code == 403
+    assert client.post("/ledger/1/edit", data={}, follow_redirects=False).status_code == 403
+    assert client.post("/ledger/1/delete", data={}, follow_redirects=False).status_code == 403
+    assert client.get("/devices").status_code == 403
+
+    client.post("/logout")
+    client.post(
+        "/login",
+        data={
+            "username": "network-auditor-user",
+            "password": "network-auditor-password",
+        },
+        follow_redirects=False,
+    )
+    devices = client.get("/devices")
+    assert devices.status_code == 200
+    assert "新增设备" not in devices.text
+    assert 'data-edit-action="/devices/' not in devices.text
+    assert client.post("/devices", data={}, follow_redirects=False).status_code == 403
+    assert client.post("/devices/1/edit", data={}, follow_redirects=False).status_code == 403
+    assert client.post("/devices/1/delete", data={}, follow_redirects=False).status_code == 403
+    assert client.get("/ledger").status_code == 403
+
+
+def test_legacy_superadmin_flag_does_not_grant_permissions(client: TestClient, webdb) -> None:
+    with webdb() as db:
+        user = User(
+            username="legacy-superadmin",
+            real_name="历史标记用户",
+            phone="13800000004",
+            password_hash=hash_password("legacy-password"),
+            is_enabled=True,
+            is_superadmin=True,
+        )
+        db.add(user)
+        db.commit()
+
+    client.post(
+        "/login",
+        data={"username": "legacy-superadmin", "password": "legacy-password"},
+        follow_redirects=False,
+    )
+    assert client.get("/").status_code == 200
+    assert client.get("/ledger").status_code == 403
+    assert client.get("/admin/users").status_code == 403
+
+
 def seed_basics(client: TestClient, webdb, name: str) -> dict[str, int]:
     """创建话术/联系人，返回 id 供扫描配置等表单使用。"""
     with webdb() as db:
@@ -516,6 +703,7 @@ def test_user_create_and_edit_persist_fields(client: TestClient, webdb, phone: s
             "password": "ops-password-1",
             "real_name": "张三",
             "phone": phone,
+            "display_name": "不再使用的名称",
         },
         follow_redirects=False,
     )
@@ -525,14 +713,16 @@ def test_user_create_and_edit_persist_fields(client: TestClient, webdb, phone: s
         assert user is not None
         assert user.real_name == "张三"
         assert user.phone == phone
+        assert user.display_name == ""
         user_id = user.id
 
-    # 列表页显示实名/手机；表单含系统管理员可不填的提示。
+    # 列表页显示实名/手机；表单明确实名是页面展示名称。
     resp = client.get("/admin/users")
     assert resp.status_code == 200
     assert "张三" in resp.text
     assert phone in resp.text
-    assert "系统管理员可不填" in resp.text
+    assert "实名（页面展示名称）" in resp.text
+    assert "显示名称" not in resp.text
 
     # 编辑实名/手机 → 落库。
     resp = client.post(
@@ -565,7 +755,7 @@ def test_user_create_and_edit_persist_fields(client: TestClient, webdb, phone: s
         assert user.phone == "13900000001"
 
 
-def test_superadmin_user_may_edit_without_phone(client: TestClient, webdb) -> None:
+def test_legacy_superadmin_user_is_read_only(client: TestClient, webdb) -> None:
     login(client)
     with webdb() as db:
         superadmin = User(
@@ -580,27 +770,13 @@ def test_superadmin_user_may_edit_without_phone(client: TestClient, webdb) -> No
         db.commit()
         admin_id = superadmin.id
 
-    # 系统管理员可留空手机；实名仍必填。
+    # 旧 is_superadmin 数据只读，不能通过用户管理修改。
     resp = client.post(
         f"/admin/users/{admin_id}/edit",
         data={"real_name": "系统管理员", "phone": "", "enabled": "1"},
         follow_redirects=False,
     )
-    assert resp.status_code == 303
-    resp = client.post(
-        f"/admin/users/{admin_id}/edit",
-        data={"real_name": "", "phone": ""},
-    )
-    assert resp.status_code == 400
-    assert "实名必填" in resp.text
-    # 超管填了手机也必须格式正确。
-    resp = client.post(
-        f"/admin/users/{admin_id}/edit",
-        data={"real_name": "系统管理员", "phone": "123"},
-    )
-    assert resp.status_code == 400
-    assert "手机号格式不正确" in resp.text
-    with webdb() as db:
-        user = db.get(User, admin_id)
-        assert user.phone == ""
-        assert user.real_name == "系统管理员"
+    assert resp.status_code == 403
+    page = client.get("/admin/users")
+    assert "内置管理员只读" in page.text
+    assert f"edit_id={admin_id}" not in page.text

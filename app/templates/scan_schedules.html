@@ -16,7 +16,7 @@
         <h2>扫描配置列表</h2>
         <span class="subtle">共 {{ schedules|length }} 条配置</span>
       </div>
-      <button class="button primary" type="button" data-modal-open="scan-schedules-modal" data-modal-title="新增扫描配置">新增配置</button>
+      {% if can('submit', 'callback') %}<button class="button primary" type="button" data-modal-open="scan-schedules-modal" data-modal-title="新增扫描配置">新增配置</button>{% endif %}
     </div>
     <div class="table-wrap">
       <table>
@@ -32,7 +32,7 @@
               <td><span class="status-pill {{ 'ok' if schedule.enabled else 'muted' }}">{{ "启用" if schedule.enabled else "停用" }}</span></td>
               <td><span class="status-pill {{ 'ok' if schedule.sms_enabled else 'muted' }}">{{ "同步" if schedule.sms_enabled else "关闭" }}</span></td>
               <td><div class="mono">{{ schedule.last_run_at|dt(schedule.timezone) if schedule.last_run_at else "-" }}</div>{% if schedule.last_error %}<div class="status-detail error">{{ schedule.last_error }}</div>{% endif %}</td>
-              <td class="actions">
+              <td class="actions">{% if can('submit', 'callback') %}
                 <button class="button secondary small" type="button" data-modal-open="scan-schedules-modal" data-modal-title="编辑扫描配置"
                         data-edit-action="/scan-schedules/{{ schedule.id }}/edit"
                         data-field-name="{{ schedule.name }}"
@@ -45,7 +45,7 @@
                         data-field-sms_enabled="{{ '1' if schedule.sms_enabled else '0' }}">编辑</button>
                 <form method="post" action="/scan-schedules/{{ schedule.id }}/toggle"><button class="button secondary small" type="submit">{{ "停用" if schedule.enabled else "启用" }}</button></form>
                 <form method="post" action="/scan-schedules/{{ schedule.id }}/delete" data-confirm="删除扫描配置「{{ schedule.name }}」？已生成的通知任务会阻止删除。"><button class="button danger small" type="submit">删除</button></form>
-              </td>
+              {% endif %}</td>
             </tr>
           {% else %}
             <tr><td colspan="9" class="empty">暂无扫描配置。</td></tr>
@@ -67,7 +67,7 @@
     <option value="Asia/Tokyo"></option><option value="Europe/London"></option><option value="America/New_York"></option>
   </datalist>
 
-  <div class="modal" id="scan-schedules-modal" role="dialog" aria-modal="true" aria-labelledby="scan-schedules-modal-title"{% if edit_schedule %} data-modal-auto-open="true"{% endif %}>
+  {% if can('submit', 'callback') %}<div class="modal" id="scan-schedules-modal" role="dialog" aria-modal="true" aria-labelledby="scan-schedules-modal-title"{% if edit_schedule %} data-modal-auto-open="true"{% endif %}>
     <div class="modal-backdrop" data-modal-close></div>
     <section class="modal-dialog">
       <div class="panel-head"><h2 id="scan-schedules-modal-title">{{ "编辑扫描配置" if edit_schedule else "新增扫描配置" }}</h2><button class="button ghost" type="button" data-modal-close aria-label="关闭">关闭</button></div>
@@ -90,5 +90,5 @@
         <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
       </form>
     </section>
-  </div>
+  </div>{% endif %}
 {% endblock %}
