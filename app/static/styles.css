@@ -836,6 +836,55 @@ textarea {
   padding-bottom: 18px;
 }
 
+/* 通知设置页：三类通知区块（话术 + 配置合并） */
+.notification-block {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.notification-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.notification-meta code {
+  font-size: 12px;
+}
+
+.notification-script {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.notification-script-text {
+  min-width: 0;
+}
+
+.notification-script-text pre {
+  margin: 6px 0 0;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f8f8f5;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .notification-script {
+    grid-template-columns: 1fr;
+  }
+}
+
 .correction-domain {
   margin: 0 18px;
   border: 1px solid var(--line);

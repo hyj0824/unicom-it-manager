@@ -119,19 +119,6 @@ def _script(db, title: str = "话术A", body: str = "正文内容", role: str = 
     return script
 
 
-def _create_script_via_web(client: TestClient, **data) -> int:
-    # 话术已收敛为三种系统模板：直接更新 role 话术正文。
-    role = data.pop("role", "notification_due_renewal")
-    body = data.pop("body", "正文内容")
-    with SessionLocal() as session:
-        script = session.scalars(select(Script).where(Script.role == role)).first()
-        script.body = body
-        script.wav_path = data.get("wav_path", "")
-        # 与 /scripts/{id}/edit 路由语义一致：有路径视为已有可用音频。
-        script.tts_status = "generated" if script.wav_path else "not_generated"
-        session.commit()
-        return script.id
-
 
 # ---------------------------------------------------------------- 存储规范：目录 / 命名 / 覆盖
 
@@ -215,39 +202,6 @@ def test_script_audio_url_only_for_audio_dir(tmp_path: Path, monkeypatch) -> Non
     assert script_service.script_audio_url(empty) == ""
 
 
-def test_generate_audio_mp3_provider_installs_mp3_and_previews(client, tmp_path, monkeypatch) -> None:
-    """edge 风格 Provider（输出 .mp3）：落盘 .mp3、试听路由返回 audio/mpeg。"""
-    login(client)
-    monkeypatch.setattr(audio_module, "AUDIO_DIR", tmp_path)
-    provider = _FakeTTSProvider(tmp_path / "provider-out")
-    provider.output_suffix = ".mp3"
-    monkeypatch.setattr(script_service, "get_tts_provider", lambda s: provider)
-    script_id = _create_script_via_web(client)
-
-    resp = client.post(f"/scripts/{script_id}/generate-audio", follow_redirects=True)
-    assert resp.status_code == 200
-    assert "音频已生成" in resp.text
-
-    with SessionLocal() as session:
-        script = session.get(Script, script_id)
-        assert script.tts_status == "generated"
-        name = Path(script.wav_path).name
-        assert name.endswith(".mp3")
-
-    assert f"/audio/{name}" in resp.text
-    audio = client.get(f"/audio/{name}")
-    assert audio.status_code == 200
-    assert audio.headers["content-type"].startswith("audio/mpeg")
-    assert audio.content == b"RIFF-fake-wave"
-
-    # 正文未变 → 缓存命中（同样按 .mp3 后缀查找）。
-    resp2 = client.post(f"/scripts/{script_id}/generate-audio", follow_redirects=True)
-    assert "无需重新生成" in resp2.text
-    assert provider.calls == 1
-
-
-# ---------------------------------------------------------------- 生成服务：成功 / 失败 / 缓存
-
 
 def test_generate_audio_none_provider_marks_failed(db, settings) -> None:
     script = _script(db)
@@ -309,46 +263,6 @@ def test_generate_audio_provider_exception_marks_failed(db, settings, monkeypatc
 # ---------------------------------------------------------------- Web：失败状态、重生成入口、试听
 
 
-def test_generate_audio_failure_shows_status_and_feedback(client) -> None:
-    login(client)
-    script_id = _create_script_via_web(client)
-
-    resp = client.post(f"/scripts/{script_id}/generate-audio", follow_redirects=True)
-    assert resp.status_code == 200
-    assert "音频生成失败" in resp.text
-    assert "TTS_PROVIDER=none does not generate audio." in resp.text  # 失败原因
-    assert "生成音频" in resp.text  # 重生成入口仍在
-
-    with SessionLocal() as session:
-        script = session.get(Script, script_id)
-        assert script.tts_status == "failed"
-        assert "does not generate audio" in script.tts_error
-        assert script.wav_path == ""
-
-
-def test_generate_audio_success_via_web_and_preview_route(client, tmp_path, monkeypatch) -> None:
-    login(client)
-    monkeypatch.setattr(audio_module, "AUDIO_DIR", tmp_path)
-    provider = _FakeTTSProvider(tmp_path / "provider-out")
-    monkeypatch.setattr(script_service, "get_tts_provider", lambda s: provider)
-    script_id = _create_script_via_web(client)
-
-    resp = client.post(f"/scripts/{script_id}/generate-audio", follow_redirects=True)
-    assert resp.status_code == 200
-    assert "音频已生成" in resp.text
-
-    with SessionLocal() as session:
-        script = session.get(Script, script_id)
-        assert script.tts_status == "generated"
-        assert script.tts_error == ""
-        name = Path(script.wav_path).name
-
-    # 页面试听：<audio> 元素指向只读音频路由，内容与落盘一致。
-    assert f"/audio/{name}" in resp.text
-    audio = client.get(f"/audio/{name}")
-    assert audio.status_code == 200
-    assert audio.headers["content-type"].startswith("audio/wav")
-    assert audio.content == b"RIFF-fake-wave"
 
 
 def test_audio_route_requires_login(client) -> None:
@@ -384,29 +298,4 @@ def test_audio_route_rejects_traversal_and_non_wav(client, tmp_path, monkeypatch
     assert mp3.content == b"ID3-fake-mp3"
 
 
-def test_scripts_page_preview_only_for_managed_audio(client, tmp_path, monkeypatch) -> None:
-    login(client)
-    monkeypatch.setattr(audio_module, "AUDIO_DIR", tmp_path)
-    managed = tmp_path / "script-9-abcdef123456.wav"
-    managed.write_bytes(b"RIFF")
-    with SessionLocal() as session:
-        script = session.scalars(
-            select(Script).where(Script.role == "notification_due_renewal")
-        ).first()
-        script.wav_path = str(managed)
-        session.commit()
-    page = client.get("/scripts")
-    assert page.status_code == 200
-    assert "/audio/script-9-abcdef123456.wav" in page.text
-    assert page.text.count("<audio") == 1
 
-
-def test_script_create_with_wav_path_marks_generated(client) -> None:
-    login(client)
-    _create_script_via_web(client, body="无占位符正文", wav_path="/tmp/x.wav")
-    with SessionLocal() as session:
-        script = session.scalars(
-            select(Script).where(Script.role == "notification_due_renewal")
-        ).one()
-        assert script.tts_status == "generated"
-        assert script.tts_error == ""

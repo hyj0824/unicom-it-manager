@@ -39,19 +39,7 @@
           <span class="subtle">话术（支持 {{ '{{待办清单}}' }} 等占位符）</span>
           <pre>{{ block.script.body if block.script else '-' }}</pre>
         </div>
-        <div class="notification-script-side">
-          {% if block.script %}
-            <span class="status-pill {{ block.script.tts_status }}">{{ '音频已生成' if block.script.tts_status == 'generated' else ('音频未生成' if block.script.tts_status == 'not_generated' else '音频生成失败') }}</span>
-            {% if block.script|script_audio_url %}<audio class="audio-preview" controls preload="none" src="{{ block.script|script_audio_url }}"></audio>{% endif %}
-            {% if can('submit', 'callback') %}
-              {% if '{{' in (block.script.body or '') %}
-                <span class="subtle" title="含占位符的话术由扫描时按负责人渲染后生成音频">生成音频不可用（含占位符）</span>
-              {% else %}
-                <form method="post" action="/scripts/{{ block.script.id }}/generate-audio"><button class="button secondary small" type="submit">生成音频</button></form>
-              {% endif %}
-            {% endif %}
-          {% endif %}
-        </div>
+        <span class="subtle">音频由扫描时按负责人渲染后自动生成</span>
       </div>
     </div>
   </section>

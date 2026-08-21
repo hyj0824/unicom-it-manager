@@ -61,7 +61,6 @@ from .services.call_worker import call_worker_service, modem_availability
 from .services.backups import backup_service
 from .services.dictionaries import active_items, resolve_or_create_item
 from .services.scripts import (
-    generate_script_audio,
     script_audio_url,
     referencing_counts as script_referencing_counts,
 )
@@ -1846,20 +1845,12 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
     form = await request.form()
     title = str(form.get("title", "")).strip()
     body = str(form.get("body", "")).strip()
-    wav_path = str(form.get("wav_path", "")).strip()
     if not title or not body:
         return redirect_to(f"/notification-settings?error={quote('标题和话术内容必填。')}")
-    old_body = script.body
+    # 系统话术只维护正文；音频由扫描时按负责人渲染后生成（任务级 Script），
+    # 模板本身不保存/展示 tts_status。
     script.title = title
     script.body = body
-    if wav_path and wav_path != script.wav_path:
-        script.wav_path = wav_path
-        script.tts_status = "generated"
-        script.tts_error = ""
-    elif body != old_body:
-        script.wav_path = ""
-        script.tts_status = "not_generated"
-        script.tts_error = ""
     db.commit()
     return redirect_to("/notification-settings")
 
@@ -1870,17 +1861,6 @@ def script_delete(script_id: int, request: Request, db: Session = Depends(get_db
     return redirect_to(f"/notification-settings?error={quote('系统话术不支持删除。')}")
 
 
-@app.post("/scripts/{script_id}/generate-audio")
-def script_generate_audio(script_id: int, request: Request, db: Session = Depends(get_db)):
-    auth.require_permission(db, request, "submit", "callback")
-    script = get_or_404(db, Script, script_id)
-    if not script.role:
-        return redirect_to(f"/notification-settings?error={quote('仅系统话术支持生成音频。')}")
-    if "{{" in (script.body or ""):
-        return redirect_to(f"/notification-settings?error={quote('正文含占位符，需扫描渲染后自动生成音频。')}")
-    message = generate_script_audio(db, script, settings)
-    db.commit()
-    return redirect_to(f"/notification-settings?notice={quote(message)}")
 
 
 @app.get("/audio/{filename:path}")
