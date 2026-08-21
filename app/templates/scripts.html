@@ -50,6 +50,25 @@
       <form class="stack" method="post" action="{{ '/scripts/' ~ edit_script.id ~ '/edit' if edit_script else '/scripts' }}" data-modal-form data-default-action="/scripts">
         <label>标题<input name="title" data-modal-field="title" value="{{ fd.get('title', edit_script.title if edit_script else '') }}" required></label>
         <label>话术文本<textarea name="body" data-modal-field="body" rows="8" required>{{ fd.get('body', edit_script.body if edit_script else '') }}</textarea></label>
+        <div class="placeholder-panel" data-placeholder-panel>
+          <div class="placeholder-panel-head">
+            <strong>可用占位符</strong>
+            <button class="button secondary small" type="button" data-script-preview>预览</button>
+          </div>
+          <p class="subtle">占位符将在扫描生成通知时替换为真实数据；未知占位符保留原样</p>
+          {% for scan_type, specs in placeholder_specs.items() %}
+            <div class="placeholder-group">
+              <strong class="placeholder-group-title">{{ scan_type|scan_type_label }}</strong>
+              <div class="placeholder-chips">
+                {% for spec in specs %}<button class="placeholder-chip" type="button" data-placeholder-chip data-token="{{ '{{' ~ spec.token ~ '}}' }}" data-example="{{ spec.example }}" title="示例：{{ spec.example }}">{{ '{{' ~ spec.token ~ '}}' }}</button>{% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="script-preview" data-script-preview-area hidden>
+          <div class="placeholder-panel-head"><strong>预览结果</strong><button class="button ghost small" type="button" data-script-preview-close>关闭预览</button></div>
+          <pre class="script-preview-output" data-script-preview-output aria-live="polite"></pre>
+        </div>
         <label>本地 WAV 路径<input name="wav_path" data-modal-field="wav_path" value="{{ fd.get('wav_path', edit_script.wav_path if edit_script else '') }}" placeholder="/home/radxa/audio/callback.wav"></label>
         <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
       </form>

@@ -75,13 +75,25 @@
         <label>配置名称<input name="name" data-modal-field="name" value="{{ fd.get('name', edit_schedule.name if edit_schedule else '') }}" placeholder="例如：每日到期维系扫描" required></label>
         <label>扫描类型
           <input list="scan-type-options" data-modal-field="scan_type_search" data-lookup-target="scan-type-id" value="{{ '到期维系' if selected_type == 'due_renewal' else ('设备回收' if selected_type == 'device_recycle' else '审核卡单') }}" autocomplete="off" placeholder="输入或搜索扫描类型" required>
-          <input type="hidden" id="scan-type-id" name="scan_type" data-modal-field="scan_type" value="{{ selected_type }}">
+          <input type="hidden" id="scan-type-id" name="scan_type" data-modal-field="scan_type" data-placeholder-type value="{{ selected_type }}">
           <span class="subtle">到期维系、设备回收、审核卡单三选一。</span>
         </label>
         <label>话术模板
           <input list="script-options" data-modal-field="script_search" data-lookup-target="scan-script-id" value="{{ edit_schedule.script.title if edit_schedule and edit_schedule.script and not fd else '' }}" autocomplete="off" placeholder="输入或搜索话术标题">
           <input type="hidden" id="scan-script-id" name="script_id" data-modal-field="script_id" value="{{ selected_script }}">
         </label>
+        <div class="placeholder-panel schedule-placeholder-panel" data-schedule-placeholder-panel>
+          <strong>该类型可用占位符</strong>
+          <p class="subtle">选择话术模板时请参考；占位符将在扫描生成通知时替换为真实数据，未知占位符保留原样。</p>
+          {% for scan_type, specs in placeholder_specs.items() %}
+            <div class="placeholder-group" data-placeholder-group="{{ scan_type }}">
+              <strong class="placeholder-group-title">{{ scan_type|scan_type_label }}</strong>
+              <div class="placeholder-chips">
+                {% for spec in specs %}<span class="placeholder-chip static" title="示例：{{ spec.example }}">{{ '{{' ~ spec.token ~ '}}' }}</span>{% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
         <label>执行时段（Cron 表达式）<input name="cron_expr" data-modal-field="cron_expr" value="{{ fd.get('cron_expr', edit_schedule.cron_expr if edit_schedule else '0 9 * * *') }}" placeholder="0 9 * * *"><span class="subtle">示例：0 9 * * * 每天 09:00 · 0 9 * * mon-fri 工作日 09:00。</span></label>
         <label>时区<input name="timezone" data-modal-field="timezone" list="timezone-options" value="{{ selected_timezone }}" autocomplete="off" placeholder="Asia/Shanghai"><span class="subtle">IANA 时区名，调度按此时区判断执行时段。</span></label>
         <label>提前天数<input type="number" name="lead_days" data-modal-field="lead_days" min="0" step="1" value="{{ selected_lead_days }}"><span class="subtle">到期前 N 天纳入扫描范围；审核卡单提醒不使用提前天数。</span></label>

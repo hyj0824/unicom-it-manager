@@ -73,6 +73,34 @@ SCAN_TYPE_LABELS: dict[str, str] = {
     "review_stuck": "审核卡单提醒",
 }
 
+# 话术占位符的展示元数据，也是前端提示与预览的唯一来源。
+# 每组必须覆盖对应扫描 ctx 注入的全部 token；渲染逻辑本身仍由
+# ``render_script_template`` 负责，未知占位符继续原样保留。
+PLACEHOLDER_SPECS: dict[str, list[dict[str, str]]] = {
+    "due_renewal": [
+        {"token": "客户名称", "example": "某某有限公司"},
+        {"token": "业务号码", "example": "848DIA11742988"},
+        {"token": "协议到期日", "example": "2026-12-31"},
+        {"token": "负责人姓名", "example": "张三"},
+        {"token": "扫描类型", "example": "协议到期维系"},
+    ],
+    "device_recycle": [
+        {"token": "客户名称", "example": "某某有限公司"},
+        {"token": "业务号码", "example": "848DIA11742988"},
+        {"token": "协议到期日", "example": "2026-12-31"},
+        {"token": "设备编码", "example": "21000001"},
+        {"token": "负责人姓名", "example": "李四"},
+        {"token": "扫描类型", "example": "退网设备回收"},
+    ],
+    "review_stuck": [
+        {"token": "客户名称", "example": "某某有限公司"},
+        {"token": "业务号码", "example": "848DIA11742988"},
+        {"token": "审核单标题", "example": "续签申请"},
+        {"token": "负责人姓名", "example": "王五"},
+        {"token": "扫描类型", "example": "审核卡单提醒"},
+    ],
+}
+
 # 通知对象职责（负责人字段）。
 DUTY_ACCOUNT_MANAGER = "客户经理"
 DUTY_NETWORK_MAINTENANCE = "网络维护责任人"

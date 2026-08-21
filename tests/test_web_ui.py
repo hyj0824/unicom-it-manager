@@ -536,6 +536,10 @@ def test_scripts_and_scan_schedules_use_modal_lookup_forms(client: TestClient) -
     assert 'data-edit-action="/scripts/' in scripts_page.text
     assert 'data-field-body="正文内容"' in scripts_page.text
     assert f'action="/scripts/{script.id}/generate-audio"' in scripts_page.text
+    assert "可用占位符" in scripts_page.text
+    assert "协议到期维系" in scripts_page.text
+    assert "{{客户名称}}" in scripts_page.text
+    assert "data-script-preview" in scripts_page.text
 
     schedules_page = client.get("/scan-schedules")
     assert schedules_page.status_code == 200
@@ -549,6 +553,9 @@ def test_scripts_and_scan_schedules_use_modal_lookup_forms(client: TestClient) -
     assert f'data-edit-action="/scan-schedules/{schedule.id}/edit"' in schedules_page.text
     assert 'data-field-enabled="0"' in schedules_page.text
     assert 'data-field-sms_enabled="1"' in schedules_page.text
+    assert "该类型可用占位符" in schedules_page.text
+    assert 'data-schedule-placeholder-panel' in schedules_page.text
+    assert 'data-placeholder-group="due_renewal"' in schedules_page.text
 
 
 def test_scripts_validation_errors_redirect_to_list(client: TestClient) -> None:

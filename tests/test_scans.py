@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from app.models import BusinessService, CallTask, NetworkDevice, ScanSchedule
 from app.services.scans import (
     DEFAULT_TEMPLATES,
+    PLACEHOLDER_SPECS,
     render_script_template,
     run_device_recycle_scan,
     run_due_renewal_scan,
@@ -33,6 +35,16 @@ def schedule(db, scan_type, lead_days=14):
 def test_template_and_defaults():
     assert render_script_template("{{ 客户名称 }} {{missing}}", {"客户名称": "甲"}) == "甲 {{missing}}"
     assert "{{负责人姓名}}" in DEFAULT_TEMPLATES["due_renewal"]
+
+
+def test_placeholder_specs_cover_default_template_tokens():
+    for scan_type, template in DEFAULT_TEMPLATES.items():
+        template_tokens = {
+            match.group(1).strip()
+            for match in re.finditer(r"\{\{\s*([^{}]+?)\s*\}\}", template)
+        }
+        spec_tokens = {spec["token"] for spec in PLACEHOLDER_SPECS[scan_type]}
+        assert template_tokens <= spec_tokens
 
 
 def test_due_renewal_uses_flat_manager_snapshot_and_deduplicates(db):
