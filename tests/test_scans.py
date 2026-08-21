@@ -26,8 +26,17 @@ def db(tmp_path):
 
 
 def schedule(db, scan_type, lead_days=14):
-    item = ScanSchedule(name="测试", scan_type=scan_type, lead_days=lead_days)
-    db.add(item)
+    # 种子迁移已创建三类固定配置；测试改为更新对应行。
+    item = db.scalars(select(ScanSchedule).where(ScanSchedule.scan_type == scan_type)).first()
+    if item is None:
+        item = ScanSchedule(name=scan_type, scan_type=scan_type)
+        db.add(item)
+    item.name = "测试"
+    item.lead_days = lead_days
+    item.enabled = True
+    item.sms_enabled = False
+    item.timezone = "Asia/Shanghai"
+    item.cron_expr = "0 9 * * *"
     db.flush()
     return item
 
@@ -58,7 +67,9 @@ def test_due_renewal_uses_flat_manager_snapshot_and_deduplicates(db):
     assert run_due_renewal_scan(db, sch, NOW) == 1
     task = db.scalars(select(CallTask)).one()
     assert task.customer_name == "客户甲" and task.dial_number == "13800000000"
-    assert json.loads(task.meta_json)["business_service_id"] == service.id
+    meta = json.loads(task.meta_json)
+    assert meta["targets"] == [{"business_service_id": service.id}]
+    assert meta["owner_phone"] == "13800000000"
     task.created_at = NOW
     db.flush()
     assert run_due_renewal_scan(db, sch, NOW) == 0

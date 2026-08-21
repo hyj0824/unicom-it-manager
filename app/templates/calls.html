@@ -15,7 +15,7 @@
         <tr>
           <th>执行时间</th>
           <th>客户主体</th>
-          <th>拨打负责人</th>
+          <th>负责人 · 待办</th>
           <th>电话</th>
           <th>话术</th>
           <th>状态</th>
@@ -30,7 +30,7 @@
           <tr id="task-{{ task.id }}">
             <td>{{ task.due_at|dt }}</td>
             <td>{{ task.customer_name or '-' }}</td>
-            <td>{{ task.contact.name if task.contact else "-" }}</td>
+            <td>{{ task.meta_json|owner_phone }} · {{ task.meta_json|target_count }} 项待办</td>
             <td class="mono">{{ task.dial_number or "-" }}</td>
             <td>{{ task.script.title }}</td>
             <td><span class="status-pill {{ task.status }}">{{ task.status|status_label }}</span></td>
@@ -81,7 +81,7 @@
         <tr>
           <th>创建时间</th>
           <th>客户主体</th>
-          <th>拨打负责人</th>
+          <th>负责人</th>
           <th>电话</th>
           <th>话术</th>
           <th>状态</th>
@@ -95,7 +95,7 @@
           <tr>
             <td>{{ record.created_at|dt }}</td>
             <td>{{ record.customer_name or '-' }}</td>
-            <td>{{ record.contact.name if record.contact else "-" }}</td>
+            <td>{{ record.task.meta_json|owner_phone if record.task else "-" }}</td>
             <td class="mono">{{ record.dial_number or "-" }}</td>
             <td>{{ record.script.title }}</td>
             <td><span class="status-pill {{ record.status }}">{{ record.status|status_label }}</span></td>

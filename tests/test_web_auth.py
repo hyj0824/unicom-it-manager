@@ -341,28 +341,29 @@ def test_legacy_superadmin_flag_does_not_grant_permissions(client: TestClient, w
 
 
 def seed_basics(client: TestClient, webdb, name: str) -> dict[str, int]:
-    """创建话术，返回 id 供扫描配置等表单使用。"""
-    client.post("/scripts", data={"title": f"话术-{name}", "body": f"内容-{name}"})
+    """更新到期维系系统话术正文，返回其 id。"""
     with webdb() as db:
-        return {
-            "script_id": db.scalar(
-                select(Script.id).where(Script.title == f"话术-{name}")
-            ),
-        }
+        script = db.scalar(
+            select(Script).where(Script.role == "notification_due_renewal")
+        )
+        script.body = f"内容-{name}"
+        db.commit()
+        return {"script_id": script.id}
 
 
 def _scan_schedule_data(ids: dict[str, int], **overrides) -> dict:
     data = {
-        "name": "每日到期维系扫描",
-        "scan_type": "due_renewal",
-        "script_id": str(ids["script_id"]),
         "cron_expr": "0 9 * * *",
         "timezone": "Asia/Shanghai",
         "lead_days": "14",
         "enabled": "on",
+        "sms_enabled": "",
     }
     data.update({key: str(value) for key, value in overrides.items()})
     return data
+
+
+
 
 
 # ---------------------------------------------------------------- 登录保护
@@ -447,159 +448,103 @@ def test_login_redirects_and_pages_render(client: TestClient) -> None:
 
 def test_script_form_validation(client: TestClient) -> None:
     login(client)
-    resp = client.post("/scripts", data={"title": " ", "body": "内容"}, follow_redirects=False)
+    # 话术已收敛为三种系统模板，不支持新增。
+    resp = client.post("/scripts", data={"title": "话术", "body": "内容"}, follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scripts?error=")
-    assert "标题和话术内容必填" in client.get(resp.headers["location"]).text
-
-    resp = client.post("/scripts", data={"title": "话术", "body": ""}, follow_redirects=False)
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scripts?error=")
-    assert "标题和话术内容必填" in client.get(resp.headers["location"]).text
-
-    resp = client.post(
-        "/scripts", data={"title": "回访话术", "body": "您好。"}, follow_redirects=False
-    )
-    assert resp.status_code == 303
-    resp = client.get("/scripts")
-    assert "回访话术" in resp.text
+    assert "系统话术不支持新增" in client.get(resp.headers["location"]).text
 
 
 
 def test_scan_schedule_form_validation(client: TestClient, webdb) -> None:
     login(client)
     ids = seed_basics(client, webdb, "客户丙")
+    with webdb() as db:
+        schedule_id = db.scalar(select(ScanSchedule).where(ScanSchedule.scan_type == "due_renewal")).id
 
-    # 名称为空 → 列表页错误回显。
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(ids, name=" "), follow_redirects=False)
+    # 不支持新增。
+    resp = client.post("/scan-schedules", data=_scan_schedule_data(ids), follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "名称不能为空" in client.get(resp.headers["location"]).text
+    assert "扫描配置固定为三类" in client.get(resp.headers["location"]).text
 
-    # 无效 scan_type → 列表页错误回显。
+    # 编辑：无效 cron → 错误回显。
     resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, scan_type="monthly"), follow_redirects=False
-    )
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "扫描类型无效" in client.get(resp.headers["location"]).text
-
-    # 无效 cron 表达式 → 列表页错误回显，提示明确。
-    resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, cron_expr="not a cron"), follow_redirects=False
-    )
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "Cron 表达式「not a cron」无效" in client.get(resp.headers["location"]).text
-
-    # 无效时区 → 列表页错误回显。
-    resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, timezone="Mars/Olympus"), follow_redirects=False
-    )
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "时区「Mars/Olympus」无效" in client.get(resp.headers["location"]).text
-
-    # 提前天数非法 → 列表页错误回显。
-    resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, lead_days="abc"), follow_redirects=False
-    )
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "提前天数必须是整数" in client.get(resp.headers["location"]).text
-
-    # 不存在的 script_id → 列表页错误回显。
-    resp = client.post(
-        "/scan-schedules", data=_scan_schedule_data(ids, script_id="999999"), follow_redirects=False
-    )
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "话术模板不存在" in client.get(resp.headers["location"]).text
-
-
-def test_scan_schedule_valid_submission_edit_toggle_delete(client: TestClient, webdb) -> None:
-    login(client)
-    ids = seed_basics(client, webdb, "客户丁")
-
-    # 创建（可空话术 + 显式字段）。
-    resp = client.post(
-        "/scan-schedules",
-        data=_scan_schedule_data(
-            ids, name="设备回收扫描", scan_type="device_recycle", lead_days="7"
-        ),
+        f"/scan-schedules/{schedule_id}/edit",
+        data=_scan_schedule_data(ids, cron_expr="not a cron"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    with webdb() as db:
-        schedule = db.scalar(
-            select(ScanSchedule).where(ScanSchedule.name == "设备回收扫描")
-        )
-        assert schedule is not None
-        assert schedule.scan_type == "device_recycle"
-        assert schedule.script_id == ids["script_id"]
-        assert schedule.cron_expr == "0 9 * * *"
-        assert schedule.timezone == "Asia/Shanghai"
-        assert schedule.lead_days == 7
-        assert schedule.enabled is True
-        schedule_id = schedule.id
+    assert "Cron 表达式「not a cron」无效" in client.get(resp.headers["location"]).text
 
-    # 列表页展示新配置。
-    resp = client.get("/scan-schedules")
-    assert resp.status_code == 200
-    assert "设备回收扫描" in resp.text
-
-    # 编辑。
+    # 编辑：无效时区 → 错误回显。
     resp = client.post(
         f"/scan-schedules/{schedule_id}/edit",
-        data=_scan_schedule_data(
-            ids, name="改名后的扫描", cron_expr="30 8 * * *", timezone="UTC", lead_days="3"
-        ),
+        data=_scan_schedule_data(ids, timezone="Mars/Olympus"),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "时区「Mars/Olympus」无效" in client.get(resp.headers["location"]).text
+
+    # 编辑：提前天数非法 → 错误回显。
+    resp = client.post(
+        f"/scan-schedules/{schedule_id}/edit",
+        data=_scan_schedule_data(ids, lead_days="abc"),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "提前天数必须是整数" in client.get(resp.headers["location"]).text
+
+
+
+def test_scan_schedule_edit_toggle(client: TestClient, webdb) -> None:
+    login(client)
+    ids = seed_basics(client, webdb, "客户丁")
+    with webdb() as db:
+        schedule = db.scalar(select(ScanSchedule).where(ScanSchedule.scan_type == "due_renewal"))
+        schedule_id = schedule.id
+
+    # 编辑生效。
+    resp = client.post(
+        f"/scan-schedules/{schedule_id}/edit",
+        data=_scan_schedule_data(ids, cron_expr="0 18 * * *", lead_days="7", sms_enabled="on"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
     with webdb() as db:
         schedule = db.get(ScanSchedule, schedule_id)
-        assert schedule.name == "改名后的扫描"
-        assert schedule.cron_expr == "30 8 * * *"
-        assert schedule.timezone == "UTC"
-        assert schedule.lead_days == 3
+        assert schedule.cron_expr == "0 18 * * *"
+        assert schedule.lead_days == 7
+        assert schedule.sms_enabled is True
+        assert schedule.enabled is True
 
-    # 停用/启用。
+    # 启停切换。
     resp = client.post(f"/scan-schedules/{schedule_id}/toggle", follow_redirects=False)
     assert resp.status_code == 303
     with webdb() as db:
         assert db.get(ScanSchedule, schedule_id).enabled is False
-    resp = client.post(f"/scan-schedules/{schedule_id}/toggle", follow_redirects=False)
-    assert resp.status_code == 303
-    with webdb() as db:
-        assert db.get(ScanSchedule, schedule_id).enabled is True
 
-    # 删除。
+    # 不支持删除。
     resp = client.post(f"/scan-schedules/{schedule_id}/delete", follow_redirects=False)
-    assert resp.status_code == 303
-    with webdb() as db:
-        assert db.get(ScanSchedule, schedule_id) is None
+    assert resp.status_code == 400
+    assert "不支持删除" in resp.text
+
 
 
 def test_scan_schedule_cron_submission(client: TestClient, webdb) -> None:
     login(client)
     ids = seed_basics(client, webdb, "客户戊")
+    with webdb() as db:
+        schedule_id = db.scalar(select(ScanSchedule).where(ScanSchedule.scan_type == "due_renewal")).id
 
     resp = client.post(
-        "/scan-schedules",
-        data=_scan_schedule_data(ids, cron_expr="0 9 * * *", script_id=""),
+        f"/scan-schedules/{schedule_id}/edit",
+        data=_scan_schedule_data(ids, cron_expr="30 9 * * *"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
-
     with webdb() as db:
-        schedule = db.scalar(
-            select(ScanSchedule).where(ScanSchedule.name == "每日到期维系扫描")
-        )
-        assert schedule is not None
-        assert schedule.cron_expr == "0 9 * * *"
-        # 未选择话术 → 使用内置默认模板。
-        assert schedule.script_id is None
+        schedule = db.get(ScanSchedule, schedule_id)
+        assert schedule.cron_expr == "30 9 * * *"
+
 
 
 # ---------------------------------------------------------------- 暂停调度

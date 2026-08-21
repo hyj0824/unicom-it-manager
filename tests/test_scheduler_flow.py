@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
-from sqlalchemy import create_engine
+from sqlalchemy import select, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from app.models import ScanSchedule
 from app.services.plans import as_utc
@@ -87,15 +87,19 @@ def make_schedule(
     timezone_name: str = "Asia/Shanghai",
     enabled: bool = True,
 ) -> ScanSchedule:
-    schedule = ScanSchedule(
-        name=name,
-        scan_type=scan_type,
-        cron_expr=cron_expr,
-        timezone=timezone_name,
-        lead_days=14,
-        enabled=enabled,
-    )
-    db.add(schedule)
+    schedule = db.scalars(select(ScanSchedule).where(ScanSchedule.scan_type == scan_type)).first()
+    if schedule is None:
+        schedule = ScanSchedule(name=name, scan_type=scan_type)
+        db.add(schedule)
+    schedule.name = name
+    schedule.cron_expr = cron_expr
+    schedule.timezone = timezone_name
+    schedule.lead_days = 14
+    schedule.enabled = enabled
+    schedule.sms_enabled = False
+    # 每类型只有一个固定配置：测试只保留目标类型启用，其余类型禁用。
+    for other in db.scalars(select(ScanSchedule).where(ScanSchedule.scan_type != scan_type)).all():
+        other.enabled = False
     db.commit()
     return schedule
 
@@ -154,8 +158,12 @@ def test_tick_skips_disabled_schedules(db: Session, fake_scans, scheduler) -> No
 def test_tick_respects_each_schedule_timezone(db: Session, fake_scans, scheduler) -> None:
     scheduler_module, _ = scheduler
     # 当前 UTC 01:00：上海 09:00 匹配；纽约为前一日 20:00，不匹配。
-    matching = make_schedule(db, name="上海扫描", timezone_name="Asia/Shanghai")
-    make_schedule(db, name="纽约扫描", timezone_name="America/New_York")
+    matching = make_schedule(db, name="上海扫描", scan_type="due_renewal", timezone_name="Asia/Shanghai")
+    make_schedule(db, name="纽约扫描", scan_type="device_recycle", timezone_name="America/New_York")
+    # make_schedule 互斥禁用其他类型；时区场景启用两条，review_stuck 保持停用。
+    for row in db.scalars(select(ScanSchedule)).all():
+        row.enabled = row.scan_type in ("due_renewal", "device_recycle")
+    db.commit()
 
     scheduler_module.scheduler_service.tick()
 
@@ -190,6 +198,10 @@ def test_tick_records_last_error_and_continues_with_other_schedules(
     scheduler_module, _ = scheduler
     failing = make_schedule(db, name="会失败的扫描")
     healthy = make_schedule(db, name="正常扫描", scan_type="device_recycle", cron_expr="0 9 * * *")
+    # 只启用这两条（make_schedule 会互斥禁用其他类型）。
+    failing.enabled = True
+    healthy.enabled = True
+    db.commit()
     fake_scans.run_scan_for_schedule.side_effect = [RuntimeError("boom"), 3]
 
     scheduler_module.scheduler_service.tick()

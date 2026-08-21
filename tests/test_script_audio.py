@@ -111,8 +111,8 @@ class _FailingTTSProvider:
         raise RuntimeError("provider exploded")
 
 
-def _script(db, title: str = "话术A", body: str = "正文内容") -> Script:
-    script = Script(title=title, body=body)
+def _script(db, title: str = "话术A", body: str = "正文内容", role: str = "") -> Script:
+    script = Script(title=title, body=body, role=role)
     db.add(script)
     db.commit()
     db.refresh(script)
@@ -120,12 +120,17 @@ def _script(db, title: str = "话术A", body: str = "正文内容") -> Script:
 
 
 def _create_script_via_web(client: TestClient, **data) -> int:
-    payload = {"title": "话术A", "body": "正文内容", "wav_path": ""}
-    payload.update(data)
-    resp = client.post("/scripts", data=payload, follow_redirects=False)
-    assert resp.status_code == 303, resp.text
+    # 话术已收敛为三种系统模板：直接更新 role 话术正文。
+    role = data.pop("role", "notification_due_renewal")
+    body = data.pop("body", "正文内容")
     with SessionLocal() as session:
-        return session.scalars(select(Script).order_by(Script.id.desc())).first().id
+        script = session.scalars(select(Script).where(Script.role == role)).first()
+        script.body = body
+        script.wav_path = data.get("wav_path", "")
+        # 与 /scripts/{id}/edit 路由语义一致：有路径视为已有可用音频。
+        script.tts_status = "generated" if script.wav_path else "not_generated"
+        session.commit()
+        return script.id
 
 
 # ---------------------------------------------------------------- 存储规范：目录 / 命名 / 覆盖
@@ -384,21 +389,24 @@ def test_scripts_page_preview_only_for_managed_audio(client, tmp_path, monkeypat
     monkeypatch.setattr(audio_module, "AUDIO_DIR", tmp_path)
     managed = tmp_path / "script-9-abcdef123456.wav"
     managed.write_bytes(b"RIFF")
-    _create_script_via_web(client, title="托管音频", wav_path=str(managed))
-    _create_script_via_web(client, title="外部音频", wav_path="/home/radxa/audio/callback.wav")
-    _create_script_via_web(client, title="无音频", wav_path="")
-
+    with SessionLocal() as session:
+        script = session.scalars(
+            select(Script).where(Script.role == "notification_due_renewal")
+        ).first()
+        script.wav_path = str(managed)
+        session.commit()
     page = client.get("/scripts")
     assert page.status_code == 200
     assert "/audio/script-9-abcdef123456.wav" in page.text
-    assert page.text.count("<audio") == 1  # 外部路径与空路径不渲染试听
-    assert "外部音频" in page.text
+    assert page.text.count("<audio") == 1
 
 
 def test_script_create_with_wav_path_marks_generated(client) -> None:
     login(client)
-    _create_script_via_web(client, title="带路径", wav_path="/tmp/x.wav")
+    _create_script_via_web(client, body="无占位符正文", wav_path="/tmp/x.wav")
     with SessionLocal() as session:
-        script = session.scalars(select(Script)).one()
+        script = session.scalars(
+            select(Script).where(Script.role == "notification_due_renewal")
+        ).one()
         assert script.tts_status == "generated"
         assert script.tts_error == ""

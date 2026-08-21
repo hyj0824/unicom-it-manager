@@ -311,10 +311,38 @@ def due_window_bounds(
     return day_start, day_start + timedelta(days=lead_days + 1)
 
 
+def _target_ids_from_meta(meta_json: str, target_key: str) -> set[int]:
+    """解析聚合 targets，并兼容迁移前的单值目标字段。"""
+
+    try:
+        meta = json.loads(meta_json or "{}")
+    except (TypeError, ValueError):
+        return set()
+    ids: set[int] = set()
+    targets = meta.get("targets")
+    if isinstance(targets, list):
+        for target in targets:
+            if not isinstance(target, dict):
+                continue
+            value = target.get(target_key)
+            if value is not None:
+                try:
+                    ids.add(int(value))
+                except (TypeError, ValueError):
+                    continue
+    # Old tasks used business_service_id/device_id/change_set_id directly.
+    if not ids and meta.get(target_key) is not None:
+        try:
+            ids.add(int(meta[target_key]))
+        except (TypeError, ValueError):
+            pass
+    return ids
+
+
 def _notified_target_ids(
     db: Session, source: str, day_start_utc: datetime, meta_key: str
 ) -> set[int]:
-    """当天已入队扫描通知任务的目标 id 集合（meta_json 解析，口径同 scans）。"""
+    """当天已入队通知的目标 id 集合；聚合任务每个 target 都计入。"""
 
     tasks = db.scalars(
         select(CallTask).where(
@@ -325,13 +353,7 @@ def _notified_target_ids(
     ).all()
     ids: set[int] = set()
     for task in tasks:
-        try:
-            meta = json.loads(task.meta_json or "{}")
-        except ValueError:
-            continue
-        value = meta.get(meta_key)
-        if value is not None:
-            ids.add(int(value))
+        ids.update(_target_ids_from_meta(task.meta_json, meta_key))
     return ids
 
 
@@ -419,24 +441,16 @@ def _reject_if_pending(db: Session, entity_type: str, entity_id: int, subject: s
 def _notification_count_map(
     db: Session, source: str, meta_key: str, ids: set[int]
 ) -> dict[int, int]:
-    """目标 id → 历史通知任务数（CallTask.source + meta_json 目标 id 匹配）。
-
-    meta 口径与扫描一致：due_renewal 用 business_service_id、device_recycle 用
-    device_id；统计全部历史任务，供「已通知次数」列展示。
-    """
+    """目标 id → 历史通知任务数，按聚合 targets 逐个命中计数。"""
 
     if not ids:
         return {}
     tasks = db.scalars(select(CallTask).where(CallTask.source == source)).all()
     counts = dict.fromkeys(ids, 0)
     for task in tasks:
-        try:
-            meta = json.loads(task.meta_json or "{}")
-        except ValueError:
-            continue
-        value = meta.get(meta_key)
-        if value is not None and int(value) in counts:
-            counts[int(value)] += 1
+        for target_id in _target_ids_from_meta(task.meta_json, meta_key):
+            if target_id in counts:
+                counts[target_id] += 1
     return counts
 
 
@@ -548,7 +562,11 @@ def list_recycle_device_rows(
     notify_counts = _notification_count_map(
         db, scans.SOURCE_DEVICE_RECYCLE, "device_id", device_ids
     )
+    notified_today = _notified_target_ids(
+        db, scans.SOURCE_DEVICE_RECYCLE, day_start, "device_id"
+    )
     for row in rows:
         row["pending"] = pending.get(row["device"].id)
         row["notify_count"] = notify_counts.get(row["device"].id, 0)
+        row["notified_today"] = row["device"].id in notified_today
     return rows

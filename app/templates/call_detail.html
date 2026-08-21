@@ -13,7 +13,7 @@
       <dl class="detail-list">
         <dt>客户</dt><dd>{{ record.customer_name or '-' }}</dd>
         <dt>拨号号码</dt><dd class="mono">{{ record.dial_number or "-" }}</dd>
-        <dt>拨打负责人</dt><dd>{{ record.contact.name if record.contact else "-" }}</dd>
+        <dt>拨打负责人</dt><dd>{{ record.task.meta_json|owner_phone if record.task else "-" }}</dd>
         <dt>话术</dt><dd>{{ record.script.title }}</dd>
         <dt>状态</dt><dd><span class="status-pill {{ record.status }}">{{ record.status|status_label }}</span></dd>
         <dt>开始拨号</dt><dd>{{ record.dialing_started_at|dt_s }}</dd>
@@ -34,6 +34,7 @@
           <dt>任务状态</dt><dd><span class="status-pill {{ record.task.status }}">{{ record.task.status|status_label }}</span></dd>
           <dt>尝试</dt><dd>{{ record.task.attempt }}/{{ record.task.max_attempts }}</dd>
           <dt>来源</dt><dd>{{ record.task.source|source_label }}</dd>
+          <dt>待办数量</dt><dd>{{ record.task.meta_json|target_count }}</dd>
           <dt>入队时间</dt><dd>{{ record.task.created_at|dt_s }}</dd>
         {% else %}
           <dt>任务</dt><dd>-</dd>

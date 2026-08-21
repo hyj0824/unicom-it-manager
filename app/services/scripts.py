@@ -83,10 +83,8 @@ def referencing_counts(db: Session, script: Script) -> dict[str, int]:
     """统计引用该话术、导致无法硬删除的业务对象数量。"""
 
     return {
-        "schedules": db.scalar(
-            select(func.count(ScanSchedule.id)).where(ScanSchedule.script_id == script.id)
-        )
-        or 0,
+        # 扫描配置按 role 取系统话术，不再直接引用 Script。
+        "schedules": 0,
         "plans": 0,
         "tasks": db.scalar(
             select(func.count(CallTask.id)).where(CallTask.script_id == script.id)
