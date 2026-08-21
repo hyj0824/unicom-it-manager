@@ -2,7 +2,7 @@
 {% block page_title %}通知设置{% endblock %}
 {% block content %}
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}{% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
-  <p class="subtle" style="margin: 0 0 12px 4px;">三类通知各自固定一个配置与一份话术。扫描时按负责人聚合待办，把话术中的占位符替换为真实数据后生成通知（电话 + 可选短信）。</p>
+  <p class="subtle" style="margin: 0 0 12px 4px;">三类通知各自固定一个配置与一份话术。扫描时按负责人聚合待办，把话术中的占位符替换为真实数据后生成音频与通知（电话 + 可选短信）。</p>
 
   {% for block in blocks %}
   <section class="panel" style="margin-bottom: 18px;">
@@ -39,7 +39,6 @@
           <span class="subtle">话术（支持 {{ '{{待办清单}}' }} 等占位符）</span>
           <pre>{{ block.script.body if block.script else '-' }}</pre>
         </div>
-        <span class="subtle">音频由扫描时按负责人渲染后自动生成</span>
       </div>
     </div>
   </section>
