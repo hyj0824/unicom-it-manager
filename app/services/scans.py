@@ -39,23 +39,20 @@ logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 
-# 固定系统话术。列表占位符是聚合通知的核心；单值占位符仍提供第一项快照，
-# 便于管理员保留个性化开头或兼容旧模板。
+# 固定系统话术。聚合通知只提供三个占位符：负责人姓名（组内唯一）、
+# 待办清单（全部事项）、扫描类型。单值占位符不再支持。
 DEFAULT_TEMPLATES: dict[str, str] = {
     "due_renewal": (
-        "您好，这里是XX运维支撑中心，通知您处理{{扫描类型}}任务：客户{{客户名称}}的"
-        "{{业务号码}}业务协议将于{{协议到期日}}到期，请{{负责人姓名}}提前联系客户办理"
-        "续签维系。待办清单：{{待办清单}}，感谢您的配合。"
+        "您好，这里是XX运维支撑中心，通知您处理{{扫描类型}}任务，您有以下待办：\n"
+        "{{待办清单}}\n请{{负责人姓名}}尽快登录系统处理，感谢您的配合。"
     ),
     "device_recycle": (
-        "您好，这里是XX运维支撑中心，通知您处理{{扫描类型}}任务：客户{{客户名称}}的"
-        "{{业务号码}}业务已退网，其中设备{{设备编码}}尚未回收，请{{负责人姓名}}尽快"
-        "安排回收。待办清单：{{待办清单}}，感谢您的配合。"
+        "您好，这里是XX运维支撑中心，通知您处理{{扫描类型}}任务，您有以下待办：\n"
+        "{{待办清单}}\n请{{负责人姓名}}尽快登录系统处理，感谢您的配合。"
     ),
     "review_stuck": (
-        "您好，这里是XX运维支撑中心，通知您处理{{扫描类型}}任务：客户{{客户名称}}的"
-        "{{业务号码}}业务提交的审核单「{{审核单标题}}」已长时间未审核，请{{负责人姓名}}"
-        "尽快登录系统审核处理。待办清单：{{待办清单}}，感谢您的配合。"
+        "您好，这里是XX运维支撑中心，通知您处理{{扫描类型}}任务，您有以下待办：\n"
+        "{{待办清单}}\n请{{负责人姓名}}尽快登录系统处理，感谢您的配合。"
     ),
 }
 
@@ -67,26 +64,16 @@ SCAN_TYPE_LABELS: dict[str, str] = {
 
 PLACEHOLDER_SPECS: dict[str, list[dict[str, str]]] = {
     "due_renewal": [
-        {"token": "客户名称", "example": "某某有限公司"},
-        {"token": "业务号码", "example": "848DIA11742988"},
-        {"token": "协议到期日", "example": "2026-12-31"},
         {"token": "负责人姓名", "example": "张三"},
-        {"token": "待办清单", "example": "1. 某某有限公司（848DIA11742988）协议2026-12-31到期"},
+        {"token": "待办清单", "example": "1. 某某有限公司（848DIA11742988）协议2026-12-31到期\n2. 某某网络（848DIA11742999）协议2027-01-15到期"},
         {"token": "扫描类型", "example": "协议到期维系"},
     ],
     "device_recycle": [
-        {"token": "客户名称", "example": "某某有限公司"},
-        {"token": "业务号码", "example": "848DIA11742988"},
-        {"token": "协议到期日", "example": "2026-12-31"},
-        {"token": "设备编码", "example": "21000001"},
         {"token": "负责人姓名", "example": "李四"},
-        {"token": "待办清单", "example": "1. 某某有限公司（848DIA11742988）设备21000001未回收"},
+        {"token": "待办清单", "example": "1. 某某有限公司（848DIA11742988）设备21000001未回收\n2. 某某有限公司（848DIA11742988）设备21000002未回收"},
         {"token": "扫描类型", "example": "退网设备回收"},
     ],
     "review_stuck": [
-        {"token": "客户名称", "example": "某某有限公司"},
-        {"token": "业务号码", "example": "848DIA11742988"},
-        {"token": "审核单标题", "example": "续签申请"},
         {"token": "负责人姓名", "example": "王五"},
         {"token": "待办清单", "example": "1. 某某有限公司（848DIA11742988）的「续签申请」待审核"},
         {"token": "扫描类型", "example": "审核卡单提醒"},
@@ -270,11 +257,7 @@ def run_due_renewal_scan(
             due_date = expires_utc.astimezone(zone).strftime("%Y-%m-%d")
             lines.append(f"{len(lines) + 1}. {service.customer_name}（{service.service_number}）协议{due_date}到期")
             targets.append({"business_service_id": service.id})
-        first_due = _as_utc(first.agreement_expires_at).astimezone(zone).strftime("%Y-%m-%d")
         ctx = {
-            "客户名称": first.customer_name,
-            "业务号码": first.service_number,
-            "协议到期日": first_due,
             "负责人姓名": (first.account_manager_name or "").strip(),
             "待办清单": "\n".join(lines),
             "扫描类型": SCAN_TYPE_LABELS.get(schedule.scan_type, schedule.scan_type),
@@ -345,14 +328,7 @@ def run_device_recycle_scan(
         for service, device in items:
             lines.append(f"{len(lines) + 1}. {service.customer_name}（{service.service_number}）设备{device.device_code}未回收")
             targets.append({"device_id": device.id, "business_service_id": service.id})
-        agreement_date = ""
-        if first_service.agreement_expires_at is not None:
-            agreement_date = _as_utc(first_service.agreement_expires_at).astimezone(zone).strftime("%Y-%m-%d")
         ctx = {
-            "客户名称": first_service.customer_name,
-            "业务号码": first_service.service_number,
-            "协议到期日": agreement_date,
-            "设备编码": first_device.device_code,
             "负责人姓名": (first_device.maintenance_name or "").strip(),
             "待办清单": "\n".join(lines),
             "扫描类型": SCAN_TYPE_LABELS.get(schedule.scan_type, schedule.scan_type),
@@ -432,9 +408,6 @@ def run_review_stuck_scan(
             lines.append(f"{len(lines) + 1}. {service.customer_name}（{service.service_number}）的「{change_set.title}」待审核")
             targets.append({"change_set_id": change_set.id})
         ctx = {
-            "客户名称": first_service.customer_name,
-            "业务号码": first_service.service_number,
-            "审核单标题": first_set.title,
             "负责人姓名": (first_user.real_name or "").strip() or first_user.username,
             "待办清单": "\n".join(lines),
             "扫描类型": SCAN_TYPE_LABELS.get(schedule.scan_type, schedule.scan_type),
