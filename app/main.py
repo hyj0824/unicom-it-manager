@@ -227,6 +227,25 @@ def from_json_map(value: str, key: str) -> str:
     return str(result) if result else "-"
 
 
+def target_count(value: str) -> int:
+    try:
+        data = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return 1
+    targets = data.get("targets")
+    if isinstance(targets, list):
+        return len(targets)
+    return 1
+
+
+def owner_phone(value: str) -> str:
+    try:
+        data = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return "-"
+    return mask_phone(str(data.get("owner_phone") or "-"))
+
+
 def status_label(value: str) -> str:
     return STATUS_LABELS.get(value, value or "-")
 
@@ -247,6 +266,8 @@ templates.env.filters["dt"] = format_dt
 templates.env.filters["dt_s"] = format_dt_seconds
 templates.env.filters["date"] = format_date
 templates.env.filters["from_json_map"] = from_json_map
+templates.env.filters["target_count"] = target_count
+templates.env.filters["owner_phone"] = owner_phone
 templates.env.filters["status_label"] = status_label
 templates.env.filters["domain_label"] = domain_label
 templates.env.filters["source_label"] = source_label
@@ -1814,7 +1835,9 @@ def scripts_template(
     edit_script: Script | None = None,
     status_code: int = 200,
 ):
-    scripts = db.scalars(select(Script).order_by(Script.created_at.desc())).all()
+    scripts = db.scalars(
+        select(Script).where(Script.role.is_not(None)).order_by(Script.role.asc())
+    ).all()
     return render(
         request,
         "scripts.html",
@@ -1845,23 +1868,7 @@ def scripts_page(
 @app.post("/scripts")
 async def script_create(request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    form = await request.form()
-    title = str(form.get("title", "")).strip()
-    body = str(form.get("body", "")).strip()
-    wav_path = str(form.get("wav_path", "")).strip()
-    if not title or not body:
-        return redirect_to(f"/scripts?error={quote('标题和话术内容必填。')}")
-    # 手动指定 WAV 时视为已有可用音频；否则待生成。
-    db.add(
-        Script(
-            title=title,
-            body=body,
-            wav_path=wav_path,
-            tts_status="generated" if wav_path else "not_generated",
-        )
-    )
-    db.commit()
-    return redirect_to("/scripts")
+    return redirect_to(f"/scripts?error={quote('系统话术不支持新增。')}")
 
 
 @app.post("/scripts/{script_id}/edit")
@@ -1874,11 +1881,16 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
     wav_path = str(form.get("wav_path", "")).strip()
     if not title or not body:
         return redirect_to(f"/scripts?error={quote('标题和话术内容必填。')}")
+    old_body = script.body
     script.title = title
     script.body = body
-    script.wav_path = wav_path
-    if wav_path:
+    if wav_path and wav_path != script.wav_path:
+        script.wav_path = wav_path
         script.tts_status = "generated"
+        script.tts_error = ""
+    elif body != old_body:
+        script.wav_path = ""
+        script.tts_status = "not_generated"
         script.tts_error = ""
     db.commit()
     return redirect_to("/scripts")
@@ -1887,42 +1899,17 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
 @app.post("/scripts/{script_id}/delete")
 def script_delete(script_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    script = get_or_404(db, Script, script_id)
-    refs = script_referencing_counts(db, script)
-    if any(refs.values()):
-        parts = []
-        for label, key in [
-            ("扫描配置", "schedules"),
-            ("回访计划", "plans"),
-            ("外呼任务", "tasks"),
-            ("通话记录", "records"),
-        ]:
-            if refs[key]:
-                parts.append(f"{label} {refs[key]} 条")
-        return scripts_template(
-            request,
-            db,
-            f"该话术仍被引用（{'、'.join(parts)}），不能删除；可先更换引用的话术。",
-            status_code=400,
-        )
-    try:
-        db.delete(script)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        return scripts_template(
-            request,
-            db,
-            "该话术被其他数据引用，不能删除。",
-            status_code=400,
-        )
-    return redirect_to("/scripts")
+    return scripts_template(request, db, "系统话术不支持删除。", status_code=400)
 
 
 @app.post("/scripts/{script_id}/generate-audio")
 def script_generate_audio(script_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
     script = get_or_404(db, Script, script_id)
+    if not script.role:
+        return scripts_template(request, db, "仅系统话术支持生成音频。", status_code=400)
+    if "{{" in (script.body or ""):
+        return redirect_to(f"/scripts?error={quote('正文含占位符，需扫描渲染后自动生成音频。')}")
     message = generate_script_audio(db, script, settings)
     db.commit()
     return redirect_to(f"/scripts?notice={quote(message)}")
@@ -1954,15 +1941,12 @@ def scan_schedules_template(
     schedules = db.scalars(
         select(ScanSchedule).order_by(ScanSchedule.created_at.desc())
     ).all()
-    scripts = db.scalars(select(Script).order_by(Script.title.asc())).all()
     return render(
         request,
         "scan_schedules.html",
         db,
         status_code=status_code,
         schedules=schedules,
-        scripts=scripts,
-        placeholder_specs=PLACEHOLDER_SPECS,
         edit_schedule=edit_schedule,
         form_data=form_data or {},
         error=error,
@@ -1971,15 +1955,6 @@ def scan_schedules_template(
 
 
 def _parse_scan_schedule_form(db: Session, form) -> dict:
-    name = str(form.get("name", "")).strip()
-    if not name:
-        raise ValueError("扫描配置名称不能为空。")
-    scan_type = str(form.get("scan_type", "")).strip()
-    if scan_type not in SCAN_TYPE_LABELS:
-        raise ValueError("扫描类型无效。")
-    script_id = _form_int(form, "script_id")
-    if script_id is not None and db.get(Script, script_id) is None:
-        raise ValueError("所选话术模板不存在。")
     cron_expr = str(form.get("cron_expr", "")).strip()
     timezone_name = str(form.get("timezone", "")).strip() or settings.default_timezone
     plan_service.validate_cron_expr(cron_expr, timezone_name)
@@ -1996,9 +1971,6 @@ def _parse_scan_schedule_form(db: Session, form) -> dict:
     enabled = str(form.get("enabled", "")) == "on"
     sms_enabled = str(form.get("sms_enabled", "")) == "on"
     return {
-        "name": name,
-        "scan_type": scan_type,
-        "script_id": script_id,
         "cron_expr": cron_expr,
         "timezone": timezone_name,
         "lead_days": lead_days,
@@ -2029,14 +2001,7 @@ def scan_schedules_page(
 @app.post("/scan-schedules")
 async def scan_schedule_create(request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    form = await request.form()
-    try:
-        data = _parse_scan_schedule_form(db, form)
-    except ValueError as exc:
-        return redirect_to(f"/scan-schedules?error={quote(str(exc))}")
-    db.add(ScanSchedule(**data))
-    db.commit()
-    return redirect_to(f"/scan-schedules?notice={quote('扫描配置已创建。')}")
+    return redirect_to(f"/scan-schedules?error={quote('扫描配置固定为三类，不支持新增。')}")
 
 
 @app.post("/scan-schedules/{schedule_id}/edit")
@@ -2049,6 +2014,8 @@ async def scan_schedule_update(schedule_id: int, request: Request, db: Session =
     except ValueError as exc:
         return redirect_to(f"/scan-schedules?error={quote(str(exc))}")
     for key, value in data.items():
+        if key == "lead_days" and schedule.scan_type != "due_renewal":
+            continue
         setattr(schedule, key, value)
     db.commit()
     notice = f"扫描配置「{schedule.name}」已保存。"
@@ -2058,30 +2025,7 @@ async def scan_schedule_update(schedule_id: int, request: Request, db: Session =
 @app.post("/scan-schedules/{schedule_id}/delete")
 def scan_schedule_delete(schedule_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    schedule = get_or_404(db, ScanSchedule, schedule_id)
-    # SQLite 默认不强制外键，显式检查引用，避免删除仍被任务引用的配置。
-    task_refs = db.scalar(
-        select(func.count(CallTask.id)).where(CallTask.scan_schedule_id == schedule.id)
-    ) or 0
-    if task_refs:
-        return scan_schedules_template(
-            request,
-            db,
-            f"该扫描配置已生成 {task_refs} 条通知任务，不能删除；如需停止扫描请先停用。",
-            status_code=400,
-        )
-    try:
-        db.delete(schedule)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        return scan_schedules_template(
-            request,
-            db,
-            "该扫描配置被其他数据引用，不能删除；如需停止扫描请先停用。",
-            status_code=400,
-        )
-    return redirect_to("/scan-schedules")
+    return scan_schedules_template(request, db, "扫描配置固定为三类，不支持删除。", status_code=400)
 
 
 @app.post("/scan-schedules/{schedule_id}/toggle")

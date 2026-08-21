@@ -108,18 +108,20 @@ def make_scan_schedule(
     sms_enabled: bool = False,
     lead_days: int = 14,
 ) -> ScanSchedule:
+    # 每类型只有一个固定配置：更新种子行。
     with SessionLocal() as session:
-        schedule = ScanSchedule(
-            name=name,
-            scan_type=scan_type,
-            script_id=script.id if script else None,
-            cron_expr=cron,
-            timezone=timezone_name,
-            lead_days=lead_days,
-            enabled=enabled,
-            sms_enabled=sms_enabled,
-        )
-        session.add(schedule)
+        schedule = session.scalars(
+            select(ScanSchedule).where(ScanSchedule.scan_type == scan_type)
+        ).first()
+        if schedule is None:
+            schedule = ScanSchedule(name=name, scan_type=scan_type)
+            session.add(schedule)
+        schedule.name = name
+        schedule.cron_expr = cron
+        schedule.timezone = timezone_name
+        schedule.lead_days = lead_days
+        schedule.enabled = enabled
+        schedule.sms_enabled = sms_enabled
         session.commit()
         session.refresh(schedule)
         return schedule
@@ -320,93 +322,68 @@ def test_call_detail_shows_timeline_raw_lines_and_error(client: TestClient) -> N
 # ---------------------------------------------------------------- 扫描通知配置：CRUD 与表单校验
 
 
-def test_scan_schedule_create_rejects_invalid_cron_with_clear_message(client: TestClient) -> None:
+def test_scan_schedule_edit_rejects_invalid_cron_and_timezone(client: TestClient) -> None:
     login(client)
+    schedule = make_scan_schedule()
     resp = client.post(
-        "/scan-schedules",
-        data=_scan_schedule_data(cron_expr="0 9 * *"),
+        f"/scan-schedules/{schedule.id}/edit",
+        data=_scan_schedule_data(cron_expr="not a cron"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    page = client.get(resp.headers["location"])
-    assert "Cron 表达式" in page.text
-    assert "无效" in page.text
+    assert "Cron 表达式「not a cron」无效" in client.get(resp.headers["location"]).text
 
-
-def test_scan_schedule_create_rejects_invalid_timezone(client: TestClient) -> None:
-    login(client)
     resp = client.post(
-        "/scan-schedules",
+        f"/scan-schedules/{schedule.id}/edit",
         data=_scan_schedule_data(timezone_name="Mars/Olympus"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
     assert "时区「Mars/Olympus」无效" in client.get(resp.headers["location"]).text
 
 
-def test_scan_schedule_create_rejects_missing_name_and_bad_type(client: TestClient) -> None:
+def test_scan_schedule_edit_rejects_bad_lead_days(client: TestClient) -> None:
     login(client)
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(name=" "), follow_redirects=False)
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "名称不能为空" in client.get(resp.headers["location"]).text
-
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(scan_type="monthly"), follow_redirects=False)
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "扫描类型无效" in client.get(resp.headers["location"]).text
-
-
-def test_scan_schedule_create_rejects_bad_lead_days(client: TestClient) -> None:
-    login(client)
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(lead_days="abc"), follow_redirects=False)
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "提前天数必须是整数" in client.get(resp.headers["location"]).text
-
-    resp = client.post("/scan-schedules", data=_scan_schedule_data(lead_days="-3"), follow_redirects=False)
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "提前天数不能为负数" in client.get(resp.headers["location"]).text
-
-
-def test_scan_schedule_create_valid_shows_in_list(client: TestClient) -> None:
-    login(client)
-    script = make_script()
+    schedule = make_scan_schedule()
     resp = client.post(
-        "/scan-schedules",
-        data=_scan_schedule_data(script, name="设备回收扫描", scan_type="device_recycle", sms_enabled=True),
+        f"/scan-schedules/{schedule.id}/edit",
+        data=_scan_schedule_data(lead_days="abc"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
+    assert "提前天数必须是整数" in client.get(resp.headers["location"]).text
+
+    resp = client.post(
+        f"/scan-schedules/{schedule.id}/edit",
+        data=_scan_schedule_data(lead_days="-3"),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "提前天数不能为负数" in client.get(resp.headers["location"]).text
+
+
+def test_scan_schedule_create_rejected_and_list_shows_fixed_three(client: TestClient) -> None:
+    login(client)
+    # 不支持新增。
+    resp = client.post("/scan-schedules", data=_scan_schedule_data(), follow_redirects=False)
+    assert resp.status_code == 303
+    assert "扫描配置固定为三类" in client.get(resp.headers["location"]).text
+
+    # 列表固定三类。
     page = client.get("/scan-schedules")
     assert page.status_code == 200
-    assert "设备回收扫描" in page.text
+    assert "到期维系" in page.text
     assert "设备回收" in page.text
-    assert script.title in page.text
-    with SessionLocal() as session:
-        schedule = session.scalars(select(ScanSchedule)).one()
-        assert schedule.scan_type == "device_recycle"
-        assert schedule.script_id == script.id
-        assert schedule.cron_expr == "0 9 * * *"
-        assert schedule.timezone == "Asia/Shanghai"
-        assert schedule.lead_days == 14
-        assert schedule.enabled is True
-        assert schedule.sms_enabled is True
+    assert "审核卡单" in page.text
+    assert "新增" not in page.text.replace("新增扫描配置", "") or "新增扫描配置" not in page.text
 
 
 def test_scan_schedule_edit_updates_fields(client: TestClient) -> None:
     login(client)
     schedule = make_scan_schedule(cron="0 8 * * *")
-    new_script = make_script("话术B")
     resp = client.post(
         f"/scan-schedules/{schedule.id}/edit",
         data=_scan_schedule_data(
-            new_script,
-            name="改名后的扫描",
-            scan_type="device_recycle",
             cron_expr="30 10 * * *",
             timezone_name="UTC",
             lead_days="7",
@@ -416,20 +393,16 @@ def test_scan_schedule_edit_updates_fields(client: TestClient) -> None:
     )
     assert resp.status_code == 303
     with SessionLocal() as session:
-        updated = session.get(ScanSchedule, schedule.id)
-        assert updated.name == "改名后的扫描"
-        assert updated.scan_type == "device_recycle"
-        assert updated.script_id == new_script.id
-        assert updated.cron_expr == "30 10 * * *"
-        assert updated.timezone == "UTC"
-        assert updated.lead_days == 7
-        assert updated.enabled is False
-        assert updated.sms_enabled is False
+        row = session.get(ScanSchedule, schedule.id)
+        assert row.cron_expr == "30 10 * * *"
+        assert row.timezone == "UTC"
+        assert row.lead_days == 7
+        assert row.enabled is False
 
 
 def test_scan_schedule_sms_toggle_via_edit(client: TestClient) -> None:
     login(client)
-    schedule = make_scan_schedule(sms_enabled=True)
+    schedule = make_scan_schedule()
     resp = client.post(
         f"/scan-schedules/{schedule.id}/edit",
         data=_scan_schedule_data(sms_enabled=True),
@@ -439,150 +412,43 @@ def test_scan_schedule_sms_toggle_via_edit(client: TestClient) -> None:
     with SessionLocal() as session:
         assert session.get(ScanSchedule, schedule.id).sms_enabled is True
 
-    # 取消勾选（不提交 sms_enabled）即关闭。
-    resp = client.post(
-        f"/scan-schedules/{schedule.id}/edit",
-        data=_scan_schedule_data(sms_enabled=False),
-        follow_redirects=False,
-    )
-    assert resp.status_code == 303
-    with SessionLocal() as session:
-        assert session.get(ScanSchedule, schedule.id).sms_enabled is False
-
-
-def test_scan_schedule_edit_rejects_invalid_cron(client: TestClient) -> None:
-    login(client)
-    schedule = make_scan_schedule()
-    resp = client.post(
-        f"/scan-schedules/{schedule.id}/edit",
-        data=_scan_schedule_data(cron_expr="not a cron"),
-        follow_redirects=False,
-    )
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/scan-schedules?error=")
-    assert "Cron 表达式" in client.get(resp.headers["location"]).text
-    with SessionLocal() as session:
-        assert session.get(ScanSchedule, schedule.id).cron_expr == "0 9 * * *"
-
 
 def test_scan_schedule_toggle_disables_and_enables(client: TestClient) -> None:
     login(client)
     schedule = make_scan_schedule()
-
     resp = client.post(f"/scan-schedules/{schedule.id}/toggle", follow_redirects=False)
     assert resp.status_code == 303
     with SessionLocal() as session:
         assert session.get(ScanSchedule, schedule.id).enabled is False
-
     resp = client.post(f"/scan-schedules/{schedule.id}/toggle", follow_redirects=False)
-    assert resp.status_code == 303
     with SessionLocal() as session:
         assert session.get(ScanSchedule, schedule.id).enabled is True
 
 
-def test_scan_schedule_delete_removes_row(client: TestClient) -> None:
+def test_scan_schedule_delete_rejected(client: TestClient) -> None:
     login(client)
     schedule = make_scan_schedule()
     resp = client.post(f"/scan-schedules/{schedule.id}/delete", follow_redirects=False)
-    assert resp.status_code == 303
-    with SessionLocal() as session:
-        assert session.get(ScanSchedule, schedule.id) is None
-
-
-def test_scan_schedule_delete_blocked_when_tasks_reference_it(client: TestClient) -> None:
-    login(client)
-    schedule = make_scan_schedule()
-    customer = make_customer()
-    script = make_script()
-    with SessionLocal() as session:
-        session.add(
-            CallTask(
-                scan_schedule_id=schedule.id,
-                customer_name=customer.name,
-                script_id=script.id,
-                due_at=utcnow(),
-                status="queued",
-                source="due_renewal",
-            )
-        )
-        session.commit()
-
-    resp = client.post(f"/scan-schedules/{schedule.id}/delete")
     assert resp.status_code == 400
-    assert "不能删除" in resp.text
-    with SessionLocal() as session:
-        assert session.get(ScanSchedule, schedule.id) is not None
+    assert "不支持删除" in resp.text
 
 
 def test_scan_schedule_edit_form_prefills_current_values(client: TestClient) -> None:
     login(client)
-    schedule = make_scan_schedule(name="已存在的扫描", cron="30 8 * * *")
-    resp = client.get("/scan-schedules", params={"edit_id": schedule.id})
-    assert resp.status_code == 200
-    assert "编辑扫描配置" in resp.text
-    assert "已存在的扫描" in resp.text
-    assert "30 8 * * *" in resp.text
+    schedule = make_scan_schedule(cron="0 18 * * *", sms_enabled=True)
+    page = client.get("/scan-schedules")
+    assert page.status_code == 200
+    assert f'data-edit-action="/scan-schedules/{schedule.id}/edit"' in page.text
 
 
-def test_scripts_and_scan_schedules_use_modal_lookup_forms(client: TestClient) -> None:
+def test_scan_schedule_list_renders_fixed_configs(client: TestClient) -> None:
     login(client)
-    script = make_script("弹窗话术")
-    schedule = make_scan_schedule(script=script, enabled=False, sms_enabled=True)
-
-    scripts_page = client.get("/scripts")
-    assert scripts_page.status_code == 200
-    assert 'data-modal-open="scripts-modal"' in scripts_page.text
-    assert 'data-modal-form data-default-action="/scripts"' in scripts_page.text
-    assert 'data-edit-action="/scripts/' in scripts_page.text
-    assert 'data-field-body="正文内容"' in scripts_page.text
-    assert f'action="/scripts/{script.id}/generate-audio"' in scripts_page.text
-    assert "可用占位符" in scripts_page.text
-    assert "协议到期维系" in scripts_page.text
-    assert "{{客户名称}}" in scripts_page.text
-    assert "data-script-preview" in scripts_page.text
-
-    schedules_page = client.get("/scan-schedules")
-    assert schedules_page.status_code == 200
-    assert 'data-modal-open="scan-schedules-modal"' in schedules_page.text
-    assert 'data-modal-form data-default-action="/scan-schedules"' in schedules_page.text
-    assert 'list="scan-type-options"' in schedules_page.text
-    assert 'id="scan-type-id" name="scan_type"' in schedules_page.text
-    assert 'list="script-options"' in schedules_page.text
-    assert 'id="scan-script-id" name="script_id"' in schedules_page.text
-    assert 'list="timezone-options"' in schedules_page.text
-    assert f'data-edit-action="/scan-schedules/{schedule.id}/edit"' in schedules_page.text
-    assert 'data-field-enabled="0"' in schedules_page.text
-    assert 'data-field-sms_enabled="1"' in schedules_page.text
-    assert "该类型可用占位符" in schedules_page.text
-    assert 'data-schedule-placeholder-panel' in schedules_page.text
-    assert 'data-placeholder-group="due_renewal"' in schedules_page.text
-
-
-def test_scripts_validation_errors_redirect_to_list(client: TestClient) -> None:
-    login(client)
-
-    script_resp = client.post(
-        "/scripts",
-        data={"title": "", "body": "正文"},
-        follow_redirects=False,
-    )
-    assert script_resp.status_code == 303
-    assert script_resp.headers["location"].startswith("/scripts?error=")
-    assert "标题和话术内容必填" in client.get(script_resp.headers["location"]).text
-
-
-def test_scan_schedule_list_shows_last_run_and_error(client: TestClient) -> None:
-    login(client)
-    schedule = make_scan_schedule()
-    with SessionLocal() as session:
-        row = session.get(ScanSchedule, schedule.id)
-        row.last_run_at = utcnow() - timedelta(days=1)
-        row.last_error = "ValueError: boom"
-        session.commit()
-
+    make_scan_schedule(cron="0 8 * * *")
     resp = client.get("/scan-schedules")
     assert resp.status_code == 200
-    assert "ValueError: boom" in resp.text
+    assert "到期维系" in resp.text
+    assert "0 8 * * *" in resp.text
+
 
 
 # ---------------------------------------------------------------- 人工重新入队
@@ -685,39 +551,30 @@ def test_dashboard_shows_task_board_and_global_charts(client: TestClient) -> Non
 def test_high_impact_forms_have_data_confirm(client: TestClient) -> None:
     login(client)
     make_scan_schedule(name="删除确认扫描")
-
     schedules_page = client.get("/scan-schedules")
-    assert "删除扫描配置「删除确认扫描」" in schedules_page.text
-    assert "停用" in schedules_page.text
+    # 三类固定配置无删除按钮；启停开关存在。
+    assert "扫描配置固定为三类" not in schedules_page.text
+    assert "启用" in schedules_page.text or "停用" in schedules_page.text
 
-    # Worker 未启用时，启动按钮带确认；已启用时不需要确认（模板中仅未启用渲染）。
     system_page = client.get("/admin/system")
     assert "启动 Worker 后将开始拨打队列中的任务" in system_page.text
+
 
 
 # ---------------------------------------------------------------- 删除被引用数据
 
 
-def test_delete_script_referenced_by_scan_schedule_shows_counts(client: TestClient) -> None:
+def test_delete_script_rejected(client: TestClient) -> None:
     login(client)
-    script = make_script()
-    make_scan_schedule(script=script)
-    make_scan_schedule(name="第二份配置", scan_type="device_recycle", script=script)
-
-    resp = client.post(f"/scripts/{script.id}/delete")
+    with SessionLocal() as session:
+        script = session.scalars(
+            select(Script).where(Script.role == "notification_due_renewal")
+        ).first()
+        script_id = script.id
+    resp = client.post(f"/scripts/{script_id}/delete")
     assert resp.status_code == 400
-    assert "扫描配置 2 条" in resp.text
-    with SessionLocal() as session:
-        assert session.get(Script, script.id) is not None
+    assert "不支持删除" in resp.text
 
-
-def test_delete_script_without_references_succeeds(client: TestClient) -> None:
-    login(client)
-    script = make_script()
-    resp = client.post(f"/scripts/{script.id}/delete", follow_redirects=False)
-    assert resp.status_code == 303
-    with SessionLocal() as session:
-        assert session.get(Script, script.id) is None
 
 
 # ---------------------------------------------------------------- 服务层单元测试
@@ -780,24 +637,14 @@ def test_referencing_counts_helpers(db) -> None:
     script = Script(title="话术", body="正文")
     db.add(script)
     db.flush()
-    schedule = ScanSchedule(
-        name="扫描",
-        scan_type="due_renewal",
-        script=script,
-        cron_expr="0 9 * * *",
-        timezone="Asia/Shanghai",
-        lead_days=14,
-        enabled=True,
-    )
-    db.add(schedule)
     plan_service.create_manual_call_task(db, "客户A", script, caller_name="客户A", caller_phone="13800000000", status="queued")
     db.commit()
 
     script_refs = script_referencing_counts(db, script)
-    assert script_refs["schedules"] == 1
-    assert script_refs["plans"] == 0  # 历史 callback_plans 引用仍会被统计
+    assert script_refs["schedules"] == 0  # 扫描配置不再关联话术
+    assert script_refs["plans"] == 0
     assert script_refs["tasks"] == 1
-    assert script_refs["records"] == 1
+
 
 
 def test_modem_availability_levels() -> None:

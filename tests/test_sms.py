@@ -25,7 +25,7 @@ import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import select, create_engine, select
 from sqlalchemy.orm import Session
 
 from app.audio import PlaybackResult
@@ -504,14 +504,15 @@ def _make_scan_data(
                 maintenance_phone=phone,
             )
         )
-    schedule = ScanSchedule(
-        name="测试扫描",
-        scan_type=scan_type,
-        lead_days=14,
-        timezone="Asia/Shanghai",
-        sms_enabled=schedule_sms,
-    )
-    db.add(schedule)
+    schedule = db.scalars(select(ScanSchedule).where(ScanSchedule.scan_type == scan_type)).first()
+    if schedule is None:
+        schedule = ScanSchedule(name="测试扫描", scan_type=scan_type)
+        db.add(schedule)
+    schedule.name = "测试扫描"
+    schedule.lead_days = 14
+    schedule.timezone = "Asia/Shanghai"
+    schedule.sms_enabled = schedule_sms
+    schedule.enabled = True
     db.flush()
     return schedule
 

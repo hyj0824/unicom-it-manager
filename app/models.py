@@ -50,6 +50,8 @@ class Script(TimestampMixin, Base):
     __tablename__ = "scripts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # 系统通知话术角色；普通/历史话术可为空，系统话术角色唯一。
+    role: Mapped[str | None] = mapped_column(String(64), unique=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     tts_status: Mapped[str] = mapped_column(String(32), default="not_generated", nullable=False)
@@ -72,10 +74,8 @@ class ScanSchedule(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    # due_renewal=协议到期维系；device_recycle=退网设备回收。
-    scan_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    # 话术模板：正文支持 {{客户名称}} 等占位符；为空时使用内置默认模板。
-    script_id: Mapped[int | None] = mapped_column(ForeignKey("scripts.id"))
+    # due_renewal=协议到期维系；device_recycle=退网设备回收；review_stuck=审核卡单。
+    scan_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True, unique=True)
     cron_expr: Mapped[str] = mapped_column(
         String(120), default="0 9 * * *", nullable=False
     )
@@ -90,7 +90,6 @@ class ScanSchedule(TimestampMixin, Base):
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
-    script: Mapped[Script | None] = relationship()
     tasks: Mapped[list["CallTask"]] = relationship(back_populates="scan_schedule")
 
 

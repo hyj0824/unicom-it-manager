@@ -69,7 +69,7 @@
       <thead>
         <tr>
           <th>设备编码</th><th>业务号码</th><th>客户</th><th>网络维护责任人</th>
-          <th>已通知次数</th><th class="actions-col">操作</th>
+          <th>今日通知</th><th>已通知次数</th><th class="actions-col">操作</th>
         </tr>
       </thead>
       <tbody>
@@ -79,6 +79,7 @@
             <td class="mono">{{ row.service.service_number }}</td>
             <td>{{ row.service.customer_name or '-' }}</td>
             <td>{{ row.maintenance_name or "-" }}</td>
+            <td>{% if row.notified_today %}<span class="status-pill ok">已通知</span>{% else %}<span class="status-pill muted">未通知</span>{% endif %}</td>
             <td>{{ row.notify_count }}</td>
             <td class="actions">
               {% if row.pending %}
@@ -89,7 +90,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="6" class="empty">暂无退网未回收设备。</td></tr>
+          <tr><td colspan="7" class="empty">暂无退网未回收设备。</td></tr>
         {% endfor %}
       </tbody>
     </table>
