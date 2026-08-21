@@ -203,14 +203,14 @@ def test_domain_read_permissions_gate_pages_and_navigation(client: TestClient, w
         follow_redirects=False,
     )
     assert response.status_code == 303
-    for path in ["/scan-schedules", "/scripts", "/calls", "/sms"]:
+    for path in ["/notification-settings", "/calls", "/sms"]:
         assert client.get(path).status_code == 200, path
     for path in ["/ledger", "/devices", "/daily-renewals", "/daily-recycles"]:
         assert client.get(path).status_code == 403, path
 
-    page = client.get("/scan-schedules")
+    page = client.get("/notification-settings")
     assert "回访只读人员" in page.text
-    assert 'href="/scan-schedules"' in page.text
+    assert 'href="/notification-settings"' in page.text
     assert 'href="/ledger"' not in page.text
     assert 'href="/admin/users"' not in page.text
 
@@ -524,8 +524,8 @@ def test_scan_schedule_edit_toggle(client: TestClient, webdb) -> None:
 
     # 不支持删除。
     resp = client.post(f"/scan-schedules/{schedule_id}/delete", follow_redirects=False)
-    assert resp.status_code == 400
-    assert "不支持删除" in resp.text
+    assert resp.status_code == 303
+    assert "不支持删除" in client.get(resp.headers["location"]).text
 
 
 

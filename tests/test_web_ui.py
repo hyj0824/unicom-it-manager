@@ -159,8 +159,7 @@ def test_login_required_redirects(client: TestClient) -> None:
     for path in [
         "/",
         "/calls",
-        "/scan-schedules",
-        "/scripts",
+        "/notification-settings",
         "/admin/system",
         "/sms",
         "/daily-renewals",
@@ -370,7 +369,7 @@ def test_scan_schedule_create_rejected_and_list_shows_fixed_three(client: TestCl
     assert "扫描配置固定为三类" in client.get(resp.headers["location"]).text
 
     # 列表固定三类。
-    page = client.get("/scan-schedules")
+    page = client.get("/notification-settings")
     assert page.status_code == 200
     assert "到期维系" in page.text
     assert "设备回收" in page.text
@@ -429,14 +428,14 @@ def test_scan_schedule_delete_rejected(client: TestClient) -> None:
     login(client)
     schedule = make_scan_schedule()
     resp = client.post(f"/scan-schedules/{schedule.id}/delete", follow_redirects=False)
-    assert resp.status_code == 400
-    assert "不支持删除" in resp.text
+    assert resp.status_code == 303
+    assert "不支持删除" in client.get(resp.headers["location"]).text
 
 
 def test_scan_schedule_edit_form_prefills_current_values(client: TestClient) -> None:
     login(client)
     schedule = make_scan_schedule(cron="0 18 * * *", sms_enabled=True)
-    page = client.get("/scan-schedules")
+    page = client.get("/notification-settings")
     assert page.status_code == 200
     assert f'data-edit-action="/scan-schedules/{schedule.id}/edit"' in page.text
 
@@ -444,7 +443,7 @@ def test_scan_schedule_edit_form_prefills_current_values(client: TestClient) -> 
 def test_scan_schedule_list_renders_fixed_configs(client: TestClient) -> None:
     login(client)
     make_scan_schedule(cron="0 8 * * *")
-    resp = client.get("/scan-schedules")
+    resp = client.get("/notification-settings")
     assert resp.status_code == 200
     assert "到期维系" in resp.text
     assert "0 8 * * *" in resp.text
@@ -551,7 +550,7 @@ def test_dashboard_shows_task_board_and_global_charts(client: TestClient) -> Non
 def test_high_impact_forms_have_data_confirm(client: TestClient) -> None:
     login(client)
     make_scan_schedule(name="删除确认扫描")
-    schedules_page = client.get("/scan-schedules")
+    schedules_page = client.get("/notification-settings")
     # 三类固定配置无删除按钮；启停开关存在。
     assert "扫描配置固定为三类" not in schedules_page.text
     assert "启用" in schedules_page.text or "停用" in schedules_page.text
@@ -571,9 +570,9 @@ def test_delete_script_rejected(client: TestClient) -> None:
             select(Script).where(Script.role == "notification_due_renewal")
         ).first()
         script_id = script.id
-    resp = client.post(f"/scripts/{script_id}/delete")
-    assert resp.status_code == 400
-    assert "不支持删除" in resp.text
+    resp = client.post(f"/scripts/{script_id}/delete", follow_redirects=False)
+    assert resp.status_code == 303
+    assert "不支持删除" in client.get(resp.headers["location"]).text
 
 
 
@@ -670,8 +669,7 @@ def test_nav_section_open_on_contacts_page(client: TestClient) -> None:
     """回归：进入「回访与通话」组页面（通讯录/扫描通知/话术/通话）时导航组必须展开。"""
     login(client)
     for page, expected_open in [
-        ("/scan-schedules", True),
-        ("/scripts", True),
+        ("/notification-settings", True),
         ("/calls", True),
         ("/sms", True),
         ("/ledger", False),

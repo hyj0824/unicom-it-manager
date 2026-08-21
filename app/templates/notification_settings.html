@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block page_title %}通知设置{% endblock %}
+{% block content %}
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}{% if notice %}<div class="alert success">{{ notice }}</div>{% endif %}
+  <p class="subtle" style="margin: 0 0 12px 4px;">三类通知各自固定一个配置与一份话术。扫描时按负责人聚合待办，把话术中的占位符替换为真实数据后生成通知（电话 + 可选短信）。</p>
+
+  {% for block in blocks %}
+  <section class="panel" style="margin-bottom: 18px;">
+    <div class="panel-head">
+      <div>
+        <h2>{{ block.scan_type|scan_type_label }}</h2>
+        <span class="subtle">{{ '启用中' if block.schedule and block.schedule.enabled else '已停用' }}</span>
+      </div>
+      {% if can('submit', 'callback') and block.schedule and block.script %}
+        <div class="button-row" style="margin:0">
+          <button class="button secondary small" type="button" data-modal-open="schedule-modal"
+                  data-modal-title="编辑{{ block.scan_type|scan_type_label }}配置"
+                  data-edit-action="/scan-schedules/{{ block.schedule.id }}/edit"
+                  data-field-cron_expr="{{ block.schedule.cron_expr }}" data-field-timezone="{{ block.schedule.timezone }}"
+                  data-field-lead_days="{{ block.schedule.lead_days }}" data-field-enabled="{{ '1' if block.schedule.enabled else '0' }}"
+                  data-field-sms_enabled="{{ '1' if block.schedule.sms_enabled else '0' }}">编辑配置</button>
+          <button class="button secondary small" type="button" data-modal-open="script-modal"
+                  data-modal-title="编辑{{ block.scan_type|scan_type_label }}话术"
+                  data-edit-action="/scripts/{{ block.script.id }}/edit"
+                  data-field-title="{{ block.script.title }}" data-field-body="{{ block.script.body }}" data-field-wav_path="{{ block.script.wav_path or '' }}">编辑话术</button>
+          <form method="post" action="/scan-schedules/{{ block.schedule.id }}/toggle"><button class="button secondary small" type="submit">{{ '停用' if block.schedule.enabled else '启用' }}</button></form>
+        </div>
+      {% endif %}
+    </div>
+    <div class="notification-block">
+      <div class="notification-meta">
+        <span>时段 <code class="mono">{{ block.schedule.cron_expr if block.schedule else '-' }}</code></span>
+        <span>时区 {{ block.schedule.timezone if block.schedule else '-' }}</span>
+        {% if block.scan_type == 'due_renewal' %}<span>提前 <strong>{{ block.schedule.lead_days if block.schedule else 14 }}</strong> 天</span>{% endif %}
+        <span>短信 {{ '开启' if block.schedule.sms_enabled else '关闭' }}</span>
+      </div>
+      <div class="notification-script">
+        <div class="notification-script-text">
+          <span class="subtle">话术（支持 {{ '{{待办清单}}' }} 等占位符）</span>
+          <pre>{{ block.script.body if block.script else '-' }}</pre>
+        </div>
+        <div class="notification-script-side">
+          {% if block.script %}
+            <span class="status-pill {{ block.script.tts_status }}">{{ '音频已生成' if block.script.tts_status == 'generated' else ('音频未生成' if block.script.tts_status == 'not_generated' else '音频生成失败') }}</span>
+            {% if block.script|script_audio_url %}<audio class="audio-preview" controls preload="none" src="{{ block.script|script_audio_url }}"></audio>{% endif %}
+            {% if can('submit', 'callback') %}
+              {% if '{{' in (block.script.body or '') %}
+                <span class="subtle" title="含占位符的话术由扫描时按负责人渲染后生成音频">生成音频不可用（含占位符）</span>
+              {% else %}
+                <form method="post" action="/scripts/{{ block.script.id }}/generate-audio"><button class="button secondary small" type="submit">生成音频</button></form>
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+
+  {% if can('submit', 'callback') %}
+  <div class="modal" id="schedule-modal" role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title">
+    <div class="modal-backdrop" data-modal-close></div>
+    <section class="modal-dialog">
+      <div class="panel-head"><h2 id="schedule-modal-title">编辑通知配置</h2><button class="button ghost" type="button" data-modal-close>关闭</button></div>
+      <form class="stack" method="post" action="/scan-schedules/0/edit" data-modal-form>
+        <label>Cron 表达式<input name="cron_expr" data-modal-field="cron_expr" required></label>
+        <label>时区<input name="timezone" data-modal-field="timezone" list="timezone-options" autocomplete="off" required></label>
+        <label>提前天数<input type="number" min="0" name="lead_days" data-modal-field="lead_days"><span class="subtle">仅到期维系使用；设备回收/审核卡单保存时忽略。</span></label>
+        <label><input type="checkbox" name="sms_enabled" data-modal-field="sms_enabled">同步短信通知</label>
+        <label><input type="checkbox" name="enabled" data-modal-field="enabled">启用</label>
+        <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div class="modal" id="script-modal" role="dialog" aria-modal="true" aria-labelledby="script-modal-title">
+    <div class="modal-backdrop" data-modal-close></div>
+    <section class="modal-dialog">
+      <div class="panel-head"><h2 id="script-modal-title">编辑通知话术</h2><button class="button ghost" type="button" data-modal-close>关闭</button></div>
+      <form class="stack" method="post" action="/scripts/0/edit" data-modal-form>
+        <input type="hidden" name="title" data-modal-field="title">
+        <label>话术文本<textarea name="body" data-modal-field="body" rows="8" required></textarea></label>
+        <div class="placeholder-panel" data-placeholder-panel>
+          <div class="placeholder-panel-head">
+            <strong>可用占位符</strong>
+            <button class="button secondary small" type="button" data-script-preview>预览</button>
+          </div>
+          <p class="subtle">占位符将在扫描生成通知时替换为真实数据；未知占位符保留原样</p>
+          {% for scan_type, specs in placeholder_specs.items() %}
+            <div class="placeholder-group">
+              <strong class="placeholder-group-title">{{ scan_type|scan_type_label }}</strong>
+              <div class="placeholder-chips">
+                {% for spec in specs %}<button class="placeholder-chip" type="button" data-placeholder-chip data-token="{{ '{{' ~ spec.token ~ '}}' }}" data-example="{{ spec.example }}" title="示例：{{ spec.example }}">{{ '{{' ~ spec.token ~ '}}' }}</button>{% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="script-preview" data-script-preview-area hidden>
+          <div class="placeholder-panel-head"><strong>预览结果</strong><button class="button ghost small" type="button" data-script-preview-close>关闭预览</button></div>
+          <pre class="script-preview-output" data-script-preview-output aria-live="polite"></pre>
+        </div>
+        <div class="button-row"><button class="button primary" type="submit">保存</button><button class="button ghost" type="button" data-modal-close>取消</button></div>
+      </form>
+    </section>
+  </div>
+  {% endif %}
+  <datalist id="timezone-options"><option value="Asia/Shanghai"><option value="UTC"><option value="America/New_York"></datalist>
+{% endblock %}

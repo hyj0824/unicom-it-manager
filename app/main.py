@@ -1826,49 +1826,17 @@ def admin_system_page(
 # ---------------------------------------------------------------- 话术
 
 
-def scripts_template(
-    request: Request,
-    db: Session,
-    error: str = "",
-    notice: str = "",
-    form_data: dict[str, str] | None = None,
-    edit_script: Script | None = None,
-    status_code: int = 200,
-):
-    scripts = db.scalars(
-        select(Script).where(Script.role.is_not(None)).order_by(Script.role.asc())
-    ).all()
-    return render(
-        request,
-        "scripts.html",
-        db,
-        status_code=status_code,
-        scripts=scripts,
-        placeholder_specs=PLACEHOLDER_SPECS,
-        edit_script=edit_script,
-        form_data=form_data or {},
-        error=error,
-        notice=notice,
-    )
-
-
 @app.get("/scripts")
-def scripts_page(
-    request: Request,
-    edit_id: int | None = None,
-    notice: str = "",
-    error: str = "",
-    db: Session = Depends(get_db),
-):
+def scripts_page(request: Request, db: Session = Depends(get_db)):
+    """话术管理已并入通知设置页。"""
     auth.require_permission(db, request, "read", "callback")
-    edit_script = db.get(Script, edit_id) if edit_id else None
-    return scripts_template(request, db, edit_script=edit_script, notice=notice, error=error)
+    return redirect_to("/notification-settings")
 
 
 @app.post("/scripts")
 async def script_create(request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    return redirect_to(f"/scripts?error={quote('系统话术不支持新增。')}")
+    return redirect_to(f"/notification-settings?error={quote('系统话术不支持新增。')}")
 
 
 @app.post("/scripts/{script_id}/edit")
@@ -1880,7 +1848,7 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
     body = str(form.get("body", "")).strip()
     wav_path = str(form.get("wav_path", "")).strip()
     if not title or not body:
-        return redirect_to(f"/scripts?error={quote('标题和话术内容必填。')}")
+        return redirect_to(f"/notification-settings?error={quote('标题和话术内容必填。')}")
     old_body = script.body
     script.title = title
     script.body = body
@@ -1893,13 +1861,13 @@ async def script_update(script_id: int, request: Request, db: Session = Depends(
         script.tts_status = "not_generated"
         script.tts_error = ""
     db.commit()
-    return redirect_to("/scripts")
+    return redirect_to("/notification-settings")
 
 
 @app.post("/scripts/{script_id}/delete")
 def script_delete(script_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    return scripts_template(request, db, "系统话术不支持删除。", status_code=400)
+    return redirect_to(f"/notification-settings?error={quote('系统话术不支持删除。')}")
 
 
 @app.post("/scripts/{script_id}/generate-audio")
@@ -1907,12 +1875,12 @@ def script_generate_audio(script_id: int, request: Request, db: Session = Depend
     auth.require_permission(db, request, "submit", "callback")
     script = get_or_404(db, Script, script_id)
     if not script.role:
-        return scripts_template(request, db, "仅系统话术支持生成音频。", status_code=400)
+        return redirect_to(f"/notification-settings?error={quote('仅系统话术支持生成音频。')}")
     if "{{" in (script.body or ""):
-        return redirect_to(f"/scripts?error={quote('正文含占位符，需扫描渲染后自动生成音频。')}")
+        return redirect_to(f"/notification-settings?error={quote('正文含占位符，需扫描渲染后自动生成音频。')}")
     message = generate_script_audio(db, script, settings)
     db.commit()
-    return redirect_to(f"/scripts?notice={quote(message)}")
+    return redirect_to(f"/notification-settings?notice={quote(message)}")
 
 
 @app.get("/audio/{filename:path}")
@@ -1927,31 +1895,6 @@ def script_audio_file(filename: str, request: Request, db: Session = Depends(get
 
 
 # ---------------------------------------------------------------- 扫描通知配置
-
-
-def scan_schedules_template(
-    request: Request,
-    db: Session,
-    error: str = "",
-    notice: str = "",
-    form_data: dict[str, str] | None = None,
-    edit_schedule: ScanSchedule | None = None,
-    status_code: int = 200,
-):
-    schedules = db.scalars(
-        select(ScanSchedule).order_by(ScanSchedule.created_at.desc())
-    ).all()
-    return render(
-        request,
-        "scan_schedules.html",
-        db,
-        status_code=status_code,
-        schedules=schedules,
-        edit_schedule=edit_schedule,
-        form_data=form_data or {},
-        error=error,
-        notice=notice,
-    )
 
 
 def _parse_scan_schedule_form(db: Session, form) -> dict:
@@ -1980,28 +1923,53 @@ def _parse_scan_schedule_form(db: Session, form) -> dict:
 
 
 @app.get("/scan-schedules")
-def scan_schedules_page(
+def scan_schedules_page(request: Request, db: Session = Depends(get_db)):
+    """扫描配置已并入通知设置页。"""
+    auth.require_permission(db, request, "read", "callback")
+    return redirect_to("/notification-settings")
+
+
+@app.get("/notification-settings")
+def notification_settings_page(
     request: Request,
-    edit_id: int | None = None,
-    notice: str = "",
     error: str = "",
+    notice: str = "",
     db: Session = Depends(get_db),
 ):
+    """通知设置：三类通知的话术与扫描配置合并在一个页面。"""
     auth.require_permission(db, request, "read", "callback")
-    edit_schedule = db.get(ScanSchedule, edit_id) if edit_id else None
-    return scan_schedules_template(
+    schedules = db.scalars(select(ScanSchedule)).all()
+    scripts = db.scalars(
+        select(Script).where(Script.role.is_not(None)).order_by(Script.role.asc())
+    ).all()
+    script_by_role = {script.role: script for script in scripts}
+    schedule_by_type = {schedule.scan_type: schedule for schedule in schedules}
+    # 组装三区块：每个扫描类型一块，携带对应配置与话术。
+    blocks = []
+    for scan_type in ["due_renewal", "device_recycle", "review_stuck"]:
+        blocks.append(
+            {
+                "scan_type": scan_type,
+                "schedule": schedule_by_type.get(scan_type),
+                "script": script_by_role.get(f"notification_{scan_type}"),
+            }
+        )
+    return render(
         request,
+        "notification_settings.html",
         db,
-        edit_schedule=edit_schedule,
-        notice=notice,
+        status_code=200,
+        blocks=blocks,
+        placeholder_specs=PLACEHOLDER_SPECS,
         error=error,
+        notice=notice,
     )
 
 
 @app.post("/scan-schedules")
 async def scan_schedule_create(request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    return redirect_to(f"/scan-schedules?error={quote('扫描配置固定为三类，不支持新增。')}")
+    return redirect_to(f"/notification-settings?error={quote('扫描配置固定为三类，不支持新增。')}")
 
 
 @app.post("/scan-schedules/{schedule_id}/edit")
@@ -2012,20 +1980,20 @@ async def scan_schedule_update(schedule_id: int, request: Request, db: Session =
     try:
         data = _parse_scan_schedule_form(db, form)
     except ValueError as exc:
-        return redirect_to(f"/scan-schedules?error={quote(str(exc))}")
+        return redirect_to(f"/notification-settings?error={quote(str(exc))}")
     for key, value in data.items():
         if key == "lead_days" and schedule.scan_type != "due_renewal":
             continue
         setattr(schedule, key, value)
     db.commit()
     notice = f"扫描配置「{schedule.name}」已保存。"
-    return redirect_to(f"/scan-schedules?notice={quote(notice)}")
+    return redirect_to(f"/notification-settings?notice={quote(notice)}")
 
 
 @app.post("/scan-schedules/{schedule_id}/delete")
 def scan_schedule_delete(schedule_id: int, request: Request, db: Session = Depends(get_db)):
     auth.require_permission(db, request, "submit", "callback")
-    return scan_schedules_template(request, db, "扫描配置固定为三类，不支持删除。", status_code=400)
+    return redirect_to(f"/notification-settings?error={quote('扫描配置固定为三类，不支持删除。')}")
 
 
 @app.post("/scan-schedules/{schedule_id}/toggle")
@@ -2034,7 +2002,7 @@ def scan_schedule_toggle(schedule_id: int, request: Request, db: Session = Depen
     schedule = get_or_404(db, ScanSchedule, schedule_id)
     schedule.enabled = not schedule.enabled
     db.commit()
-    return redirect_to("/scan-schedules")
+    return redirect_to("/notification-settings")
 
 
 # ---------------------------------------------------------------- 短信通知
