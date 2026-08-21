@@ -1,3 +1,26 @@
+function insertAtCursor(textarea, value) {
+  if (!textarea) return;
+  const start = typeof textarea.selectionStart === "number"
+    ? textarea.selectionStart
+    : textarea.value.length;
+  const end = typeof textarea.selectionEnd === "number" ? textarea.selectionEnd : start;
+  textarea.value = textarea.value.slice(0, start) + value + textarea.value.slice(end);
+  const cursor = start + value.length;
+  textarea.focus();
+  textarea.setSelectionRange(cursor, cursor);
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+window.insertAtCursor = insertAtCursor;
+
+function updateSchedulePlaceholderGroups(modal) {
+  if (!modal) return;
+  const selectedType = modal.querySelector("[data-placeholder-type]")?.value || "";
+  modal.querySelectorAll("[data-placeholder-group]").forEach((group) => {
+    group.hidden = group.dataset.placeholderGroup !== selectedType;
+  });
+}
+
 /* 通用弹窗工具：页面按钮通过 data-modal-open 打开，data-field-* 填充编辑值。 */
 (function setupModals() {
   const modalById = (value) => {
@@ -36,6 +59,13 @@
         }
       });
     }
+    const previewArea = modal.querySelector("[data-script-preview-area]");
+    if (previewArea) {
+      previewArea.hidden = true;
+      const output = previewArea.querySelector("[data-script-preview-output]");
+      if (output) output.textContent = "";
+    }
+    updateSchedulePlaceholderGroups(modal);
     modal.classList.add("is-open");
     document.body.classList.add("modal-open");
     const first = modal.querySelector("input:not([type='hidden']), select, textarea");
@@ -94,6 +124,63 @@ function bindLookup(input) {
 }
 
 document.querySelectorAll("[data-lookup-target]").forEach(bindLookup);
+
+document.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-placeholder-chip][data-token]");
+  if (chip) {
+    const panel = chip.closest("[data-placeholder-panel]");
+    const textarea = panel?.closest("form")?.querySelector("textarea[name='body']");
+    if (textarea) insertAtCursor(textarea, chip.dataset.token);
+    return;
+  }
+
+  const previewButton = event.target.closest("[data-script-preview]");
+  if (previewButton) {
+    const modal = previewButton.closest(".modal");
+    const textarea = modal?.querySelector("textarea[name='body']");
+    const previewArea = modal?.querySelector("[data-script-preview-area]");
+    const output = previewArea?.querySelector("[data-script-preview-output]");
+    if (!textarea || !previewArea || !output) return;
+
+    const examples = {};
+    modal.querySelectorAll("[data-placeholder-chip][data-token]").forEach((item) => {
+      const match = item.dataset.token.match(/^\{\{\s*([^{}]+?)\s*\}\}$/);
+      const token = match?.[1].trim();
+      if (token && !Object.prototype.hasOwnProperty.call(examples, token)) {
+        examples[token] = item.dataset.example || "";
+      }
+    });
+    output.textContent = textarea.value.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, key) => {
+      const normalized = key.trim();
+      return Object.prototype.hasOwnProperty.call(examples, normalized)
+        ? examples[normalized]
+        : match;
+    });
+    previewArea.hidden = false;
+    return;
+  }
+
+  const closePreview = event.target.closest("[data-script-preview-close]");
+  if (closePreview) {
+    const previewArea = closePreview.closest("[data-script-preview-area]");
+    if (previewArea) previewArea.hidden = true;
+  }
+});
+
+const schedulePlaceholderModal = document.getElementById("scan-schedules-modal");
+if (schedulePlaceholderModal) {
+  schedulePlaceholderModal.addEventListener("input", (event) => {
+    if (event.target.matches("[data-placeholder-type], [data-modal-field='scan_type_search']")) {
+      updateSchedulePlaceholderGroups(schedulePlaceholderModal);
+    }
+  });
+  schedulePlaceholderModal.addEventListener("change", (event) => {
+    if (event.target.matches("[data-placeholder-type], [data-modal-field='scan_type_search']")) {
+      updateSchedulePlaceholderGroups(schedulePlaceholderModal);
+    }
+  });
+  updateSchedulePlaceholderGroups(schedulePlaceholderModal);
+}
 
 document.addEventListener("submit", (event) => {
   const form = event.target;

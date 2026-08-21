@@ -558,6 +558,82 @@ textarea {
   word-break: break-all;
 }
 
+.placeholder-panel,
+.script-preview {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  background: #f8faf7;
+}
+
+.placeholder-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.placeholder-group {
+  display: grid;
+  gap: 6px;
+}
+
+.placeholder-group-title {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.placeholder-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.placeholder-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: var(--ink);
+  background: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.placeholder-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary-strong);
+  background: #edf8f5;
+}
+
+.placeholder-chip.static {
+  cursor: default;
+}
+
+.placeholder-chip.static:hover {
+  border-color: var(--line);
+  color: var(--ink);
+  background: #ffffff;
+}
+
+.script-preview-output {
+  min-height: 48px;
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+  font: inherit;
+}
+
 .audio-preview {
   display: block;
   height: 32px;

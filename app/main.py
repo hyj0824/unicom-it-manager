@@ -73,6 +73,7 @@ from .services.settings import (
     is_worker_enabled,
     set_setting,
 )
+from .services.scans import PLACEHOLDER_SPECS
 from .services.users import (
     hash_password,
     role_names,
@@ -1820,6 +1821,7 @@ def scripts_template(
         db,
         status_code=status_code,
         scripts=scripts,
+        placeholder_specs=PLACEHOLDER_SPECS,
         edit_script=edit_script,
         form_data=form_data or {},
         error=error,
@@ -1960,6 +1962,7 @@ def scan_schedules_template(
         status_code=status_code,
         schedules=schedules,
         scripts=scripts,
+        placeholder_specs=PLACEHOLDER_SPECS,
         edit_schedule=edit_schedule,
         form_data=form_data or {},
         error=error,
